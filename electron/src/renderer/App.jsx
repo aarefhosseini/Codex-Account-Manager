@@ -2799,6 +2799,7 @@ function AppContent() {
   const autoSwitchStateTimerRef = useRef(null);
   const debugCaptureTimerRef = useRef(null);
   const desktopLogSigRef = useRef({ sig: "", ts: 0 });
+  const handledLoginSessionRef = useRef("");
   const [clockTick, setClockTick] = useState(Date.now());
   const debugLogs = useMemo(() => mergeDebugLogs(backendDebugLogs, desktopDebugLogs), [backendDebugLogs, desktopDebugLogs]);
 
@@ -3728,6 +3729,7 @@ function AppContent() {
         name: profile.name,
         email: profile.email_display || profile.email || "",
         accountId: profile.account_id || "",
+        error: profile.error || "",
       },
     });
   }
@@ -4112,14 +4114,16 @@ function AppContent() {
     notifySuccess("Import applied");
   }
 
-  async function handleRename(name) {
-    const newName = window.prompt("Rename profile", name || "");
-    if (!newName || !newName.trim() || newName.trim() === name) return;
+  async function handleRename(name, newName) {
+    const oldName = String(name || "").trim();
+    const nextName = String(newName || "").trim();
+    if (!oldName || !nextName || nextName === oldName) return;
     await request("/api/local/rename", {
       method: "POST",
-      body: JSON.stringify({ old_name: name, new_name: newName.trim() }),
+      body: JSON.stringify({ old_name: oldName, new_name: nextName }),
     });
     await loadAll();
+    notifySuccess("Profile renamed", `"${oldName}" was renamed to "${nextName}".`);
   }
 
   async function handleRemove(name) {
@@ -4462,11 +4466,70 @@ function AppContent() {
     }
     const sessionId = String(modal?.session?.id || "").trim();
     const sessionStatus = String(modal?.session?.status || "").trim().toLowerCase();
-    if (!sessionId || sessionStatus !== "running") {
+    if (!sessionId) {
       return undefined;
     }
 
     let cancelled = false;
+    const applyCompletedSession = async (sessionPayload) => {
+      const marker = [
+        modalType,
+        sessionId,
+        String(sessionPayload?.updated_at || sessionPayload?.finished_at || sessionPayload?.status || "").trim(),
+      ].join(":");
+      if (handledLoginSessionRef.current === marker) {
+        return;
+      }
+      handledLoginSessionRef.current = marker;
+      const targetName = String(sessionPayload?.name || modal?.name || "").trim();
+      if (modalType === "add-account") {
+        setModal((current) => (
+          current && current.type === "add-account"
+            ? { ...current, session: sessionPayload, busy: true, detecting: true, completed: false, successMessage: "" }
+            : current
+        ));
+      }
+      await loadAll({ showLoading: false, clearUsageCache: true });
+      await forceRefreshUsage({ timeoutSec: 8 }).catch(() => {});
+      if (targetName) {
+        await refreshProfileUsage(targetName, { timeoutSec: 8 }).catch(() => {});
+      }
+      const refreshedEmail = resolveProfileEmailByName(targetName);
+      if (cancelled) return;
+      if (modalType === "add-account") {
+        setModal((current) => (
+          current && current.type === "add-account"
+            ? {
+              ...current,
+              email: refreshedEmail || current.email || "",
+              session: sessionPayload,
+              busy: false,
+              detecting: false,
+              completed: true,
+              successMessage: targetName ? `Profile detected and refreshed: ${targetName}` : "Profile login finished and refreshed.",
+            }
+            : current
+        ));
+      } else {
+        setModal(null);
+        notifySuccess("Login completed", targetName ? `Profile refreshed: ${targetName}` : "Profile login finished.");
+      }
+    };
+
+    if (sessionStatus === "completed") {
+      applyCompletedSession(modal?.session || {}).catch((err) => {
+        if (!cancelled) {
+          setError(err?.message || String(err));
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (sessionStatus !== "running") {
+      return undefined;
+    }
+
     const tick = async () => {
       try {
         const nextSession = await request(`/api/local/add/session?id=${encodeURIComponent(sessionId)}`, {});
@@ -4478,39 +4541,7 @@ function AppContent() {
         ));
         const nextStatus = String(nextSession?.status || "").trim().toLowerCase();
         if (nextStatus === "completed") {
-          const targetName = String(nextSession?.name || modal?.name || "").trim();
-          if (modalType === "add-account") {
-            setModal((current) => (
-              current && current.type === "add-account"
-                ? { ...current, session: nextSession, busy: true, detecting: true, completed: false, successMessage: "" }
-                : current
-            ));
-          }
-          await loadAll({ showLoading: false, clearUsageCache: true });
-          await forceRefreshUsage({ timeoutSec: 8 }).catch(() => {});
-          if (targetName) {
-            await refreshProfileUsage(targetName, { timeoutSec: 8 }).catch(() => {});
-          }
-          const refreshedEmail = resolveProfileEmailByName(targetName);
-          if (cancelled) return;
-          if (modalType === "add-account") {
-            setModal((current) => (
-              current && current.type === "add-account"
-                ? {
-                    ...current,
-                    email: refreshedEmail || current.email || "",
-                    session: nextSession,
-                    busy: false,
-                    detecting: false,
-                    completed: true,
-                    successMessage: targetName ? `Profile detected and refreshed: ${targetName}` : "Profile login finished and refreshed.",
-                  }
-                : current
-            ));
-          } else {
-            setModal(null);
-            notifySuccess("Login completed", targetName ? `Profile refreshed: ${targetName}` : "Profile login finished.");
-          }
+          await applyCompletedSession(nextSession);
         } else if (nextStatus === "failed") {
           setError(nextSession?.error || "Login session failed");
         }
@@ -4837,11 +4868,117 @@ function AppContent() {
       {modal?.type === "row-actions" && (
         <Dialog title="Row actions" size="sm" onClose={() => setModal(null)} footer={<Button onClick={() => setModal(null)}>Done</Button>}>
           <LabelValueRow label="Profile" value={modal.profile?.name || "-"} />
+          {isAuthExpiredLabel(usageErrorLabel(modal.profile?.error)) ? (
+            <div className="workspace-error-inline" role="alert">
+              <AuthExpiredBadge />
+              <span>This profile auth snapshot is expired. Re-login to refresh the session.</span>
+            </div>
+          ) : null}
           <div className="settings-inline-actions row-actions-grid">
-            <Button onClick={() => { setModal(null); handleRename(modal.profile?.name).catch((e) => setError(e?.message || String(e))); }}>Edit</Button>
+            <Button onClick={() => setModal({
+              type: "rename-profile",
+              name: modal.profile?.name || "",
+              draftName: modal.profile?.name || "",
+              busy: false,
+            })}
+            >
+              Edit
+            </Button>
+            <Button
+              variant="warning"
+              onClick={() => {
+                openAuthRelogin(modal.profile);
+              }}
+            >
+              Re-login profile
+            </Button>
             <Button onClick={() => copyToClipboard("Email", modal.profile?.email)}>Copy email</Button>
             <Button onClick={() => copyToClipboard("ID", modal.profile?.accountId)}>Copy ID</Button>
             <Button variant="danger" onClick={() => { setModal(null); handleRemove(modal.profile?.name); }}>Remove account</Button>
+          </div>
+        </Dialog>
+      )}
+
+      {modal?.type === "rename-profile" && (
+        <Dialog
+          title={`Rename profile - ${modal.name || "profile"}`}
+          size="sm"
+          onClose={() => setModal(null)}
+          footer={(
+            <>
+              <Button onClick={() => setModal(null)}>Cancel</Button>
+              <Button
+                variant="primary"
+                loading={!!modal.busy}
+                disabled={!!modal.busy || !String(modal.draftName || "").trim() || String(modal.draftName || "").trim() === String(modal.name || "").trim()}
+                disabledReason="Enter a new profile name to continue."
+                onClick={() => {
+                  const currentName = String(modal.name || "").trim();
+                  const nextName = String(modal.draftName || "").trim();
+                  if (!currentName || !nextName || nextName === currentName) {
+                    return;
+                  }
+                  setModal((current) => (
+                    current?.type === "rename-profile"
+                      ? { ...current, busy: true }
+                      : current
+                  ));
+                  handleRename(currentName, nextName)
+                    .then(() => setModal(null))
+                    .catch((e) => {
+                      setModal((current) => (
+                        current?.type === "rename-profile"
+                          ? { ...current, busy: false }
+                          : current
+                      ));
+                      setError(e?.message || String(e));
+                    });
+                }}
+              >
+                Save
+              </Button>
+            </>
+          )}
+        >
+          <div className="modal-form">
+            <p>Update the local display name for this saved profile.</p>
+            <label htmlFor="rename-profile-name">Profile name</label>
+            <input
+              id="rename-profile-name"
+              autoFocus
+              value={modal.draftName || ""}
+              disabled={!!modal.busy}
+              onChange={(event) => setModal((current) => (
+                current?.type === "rename-profile"
+                  ? { ...current, draftName: event.target.value }
+                  : current
+              ))}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                const currentName = String(modal.name || "").trim();
+                const nextName = String(modal.draftName || "").trim();
+                if (!currentName || !nextName || nextName === currentName || modal.busy) {
+                  return;
+                }
+                setModal((current) => (
+                  current?.type === "rename-profile"
+                    ? { ...current, busy: true }
+                    : current
+                ));
+                handleRename(currentName, nextName)
+                  .then(() => setModal(null))
+                  .catch((e) => {
+                    setModal((current) => (
+                      current?.type === "rename-profile"
+                        ? { ...current, busy: false }
+                        : current
+                    ));
+                    setError(e?.message || String(e));
+                  });
+              }}
+            />
+            <p className="muted">This only changes the saved profile label in the app.</p>
           </div>
         </Dialog>
       )}
@@ -5053,7 +5190,7 @@ function AppContent() {
           footer={<Button onClick={() => setModal(null)}>Close</Button>}
         >
           <div className="modal-form">
-            <p>Replace expired auth for this profile using your preferred login flow.</p>
+            <p>Refresh auth for this profile using your preferred login flow.</p>
             <div className="auth-session-card">
               <LabelValueRow label="Profile" value={modal.name || "-"} />
               <LabelValueRow label="Email" value={modal.email || "-"} />

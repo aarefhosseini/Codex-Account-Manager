@@ -2775,12 +2775,14 @@ def collect_list_data(config: dict | None = None):
         if meta_path.exists():
             try:
                 meta = load_json(meta_path)
-                hint = meta.get("account_hint", "unknown")
+                hint = str(meta.get("account_hint") or "").strip()
                 saved_at = meta.get("saved_at", "unknown")
             except Exception:
                 pass
-        if hint is None:
+        if not hint or hint.lower() == "unknown":
             hint = account_hint_from_auth(auth_path) if auth_path.exists() else "missing auth"
+        if not hint:
+            hint = "unknown"
         rows.append(
             {
                 "name": p.name,

@@ -29,6 +29,10 @@ function devCoreWrapperPath(rootDir) {
   return path.join(rootDir, MAC_RUNTIME_DIRNAME, DEV_CORE_WRAPPER_NAME);
 }
 
+function devWindowsCoreCommandPath(rootDir) {
+  return path.join(rootDir, "build", "python-core", "core", "codex-account.exe");
+}
+
 function resolveDevPythonCommand({ env = process.env, fsImpl = fs } = {}) {
   const candidates = [
     env.CAM_ELECTRON_PYTHON,
@@ -70,7 +74,12 @@ function buildDevRuntimeEnv(rootDir, env = process.env, platform = process.platf
     CAM_ELECTRON_STARTUP_DEBUG: "1",
     CAM_ELECTRON_APP_LAUNCH_CONTEXT: "dev-script",
   };
-  if (platform !== "win32") {
+  if (platform === "win32") {
+    const coreCommand = devWindowsCoreCommandPath(rootDir);
+    if (fsImpl.existsSync(coreCommand)) {
+      nextEnv.CAM_ELECTRON_CORE_COMMAND = coreCommand;
+    }
+  } else {
     nextEnv.CAM_ELECTRON_CORE_COMMAND = prepareDevCoreWrapper(rootDir, env, fsImpl);
   }
   return nextEnv;
