@@ -615,12 +615,19 @@ async function getUnifiedUpdateStatus({ force = false } = {}) {
     pendingUpdate: pendingUpdateState,
     updaterDevMode: updaterDevModeEnabled(),
     platform: process.platform,
+    bundledCoreAuthoritative: bundledCoreRequired(),
   });
   updateStatusCache = status;
   return status;
 }
 
 function pendingUpdateDownloadDir() {
+  try {
+    const downloadsDir = String(app.getPath("downloads") || "").trim();
+    if (downloadsDir) {
+      return downloadsDir;
+    }
+  } catch (_) {}
   return path.join(app.getPath("userData"), "updates");
 }
 
@@ -628,7 +635,14 @@ function pendingCoreInstallSpec() {
   return String(pendingUpdateState?.coreInstallSpec || "").trim();
 }
 
+function bundledCoreRequired() {
+  return Boolean(app.isPackaged && !process.env.CAM_ELECTRON_CORE_COMMAND);
+}
+
 async function syncCoreToAppVersion({ targetVersion = app.getVersion(), coreInstallSpec = "" } = {}) {
+  if (bundledCoreRequired()) {
+    throw new Error("The packaged desktop app uses a bundled Python core. Reinstall or update the desktop app instead of syncing the core with pipx.");
+  }
   if (!runtimeState.python.available || !runtimeState.python.supported) {
     throw new Error("Python 3.11+ must be installed before the core can be updated.");
   }
@@ -821,7 +835,7 @@ async function runUnifiedUpdateFlow(options = {}) {
         status: "awaiting-user",
         percent: 100,
         targetVersion: initialStatus.latest_version,
-        detail: "Local simulation feed downloaded the desktop asset. Replace it with a real installer if you want a full install test, then relaunch the app manually to continue.",
+        detail: `Local simulation feed downloaded the desktop asset to ${filePath}. Replace it with a real installer if you want a full install test, then relaunch the app manually to continue.`,
       });
       return getUnifiedUpdateStatus({ force: false });
     }
@@ -835,7 +849,7 @@ async function runUnifiedUpdateFlow(options = {}) {
       status: "awaiting-user",
       percent: 100,
       targetVersion: initialStatus.latest_version,
-      detail: "Finish installing the new desktop app from the opened DMG, then relaunch this app to complete the Python core sync.",
+      detail: `Installer opened from ${filePath}. Finish installing the new desktop app, then relaunch it to use the bundled Python core.`,
     });
     return getUnifiedUpdateStatus({ force: false });
   }
@@ -932,6 +946,19 @@ async function maybeResumePendingUpdate() {
         persistPendingUpdateState(null);
       }
     }
+    return;
+  }
+  if (bundledCoreRequired()) {
+    persistPendingUpdateState(null);
+    await getUnifiedUpdateStatus({ force: true });
+    pushUpdateProgress({
+      phase: "failed",
+      label: "Bundled core mismatch",
+      status: "failed",
+      percent: 100,
+      targetVersion: `v${app.getVersion()}`,
+      detail: "The installed desktop app did not include the expected bundled Python core. Reinstall the desktop app.",
+    });
     return;
   }
   try {
@@ -1956,6 +1983,8 @@ async function checkRuntime({ activateBackend = true } = {}) {
 
   const discovered = await resolveRuntimeStatus({
     loadStoredRuntimeState: () => loadStoredRuntimeState({ appLike: app }),
+    resourcesPath: process.resourcesPath,
+    requireBundledCore: bundledCoreRequired(),
   });
   setRuntimeState(discovered);
 
@@ -2010,6 +2039,9 @@ function registerIpcHandlers() {
   });
   handle("desktop:retry-runtime-check", async () => checkRuntime({ activateBackend: true }));
   const installCoreHandler = async () => {
+    if (bundledCoreRequired()) {
+      throw new Error("The packaged desktop app includes its Python core. Reinstall or update the desktop app if the bundled core is missing or damaged.");
+    }
     if (!runtimeState.python.available || !runtimeState.python.supported) {
       throw new Error("Python 3.11+ must be installed before the core can be bootstrapped.");
     }
@@ -2265,6 +2297,7 @@ async function bootstrap() {
   pendingOpenProfilesFromNotification = wasLaunchedFromWindowsNotification(process.argv);
   createSplashWindow();
   createMainWindow();
+  syncDesktopTray(buildUsageSummary(null), desktopState?.config);
   if (pendingOpenProfilesFromNotification) {
     openProfilesFromNotification();
   }

@@ -101,6 +101,38 @@ test("buildUnifiedUpdateStatus ignores release feed versions older than the inst
   );
 });
 
+test("buildUnifiedUpdateStatus treats packaged bundled core drift as a reinstall diagnostic", () => {
+  const status = buildUnifiedUpdateStatus({
+    appVersion: "0.0.21",
+    bundledCoreAuthoritative: true,
+    runtimeState: {
+      python: {
+        available: false,
+        supported: false,
+        version: "",
+      },
+      core: {
+        installed: true,
+        version: "0.0.16",
+      },
+    },
+    releaseNotes: {
+      status: "synced",
+      status_text: "Synced from GitHub",
+      releases: [
+        { tag: "v0.0.21", published_at: "2026-04-30T10:00:00Z" },
+      ],
+    },
+  });
+
+  assert.equal(status.status, "bundled_core_reinstall_required");
+  assert.equal(status.core_update_needed, false);
+  assert.equal(status.bundled_core_reinstall_required, true);
+  assert.equal(status.system_python.required, false);
+  assert.equal(status.system_python.update_available, false);
+  assert.match(status.status_text, /Reinstall the desktop app/);
+});
+
 test("buildUnifiedUpdateStatus clears stale pending desktop update after current app and core match", () => {
   const status = buildUnifiedUpdateStatus({
     appVersion: "0.0.21",

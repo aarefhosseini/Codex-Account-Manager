@@ -76,6 +76,30 @@ class CliCoreTests(unittest.TestCase):
         self.assertEqual(cli.electron_app_dir().name, "electron")
         self.assertTrue((cli.electron_app_dir() / "package.json").exists())
 
+    def test_build_ui_version_handles_missing_frozen_source_file(self):
+        version = cli._build_ui_version(str(Path(self.tmp.name) / "missing" / "cli.py"))
+
+        self.assertEqual(len(version), 12)
+        self.assertRegex(version, r"^[0-9a-f]+$")
+
+    def test_detect_core_runtime_reports_frozen_executable(self):
+        with mock.patch("sys.executable", "/Applications/CAM.app/Contents/Resources/core/codex-account"):
+            with mock.patch("sys.argv", ["/Applications/CAM.app/Contents/Resources/core/codex-account"]):
+                with mock.patch("sys.frozen", True, create=True):
+                    runtime = cli.detect_core_runtime()
+
+        self.assertTrue(runtime["installed"])
+        self.assertEqual(runtime["command_path"], "/Applications/CAM.app/Contents/Resources/core/codex-account")
+
+    def test_build_ui_serve_command_uses_frozen_executable_without_script_path(self):
+        with mock.patch("sys.executable", "/Applications/CAM.app/Contents/Resources/core/codex-account"):
+            with mock.patch("sys.frozen", True, create=True):
+                command = cli._build_ui_serve_command("127.0.0.1", 47831, 5.0, 30.0, "token")
+
+        self.assertEqual(command[0], "/Applications/CAM.app/Contents/Resources/core/codex-account")
+        self.assertEqual(command[1], "ui")
+        self.assertNotIn("cli.py", " ".join(command))
+
     def test_platform_process_candidates_on_macos_are_strict(self):
         with mock.patch("sys.platform", "darwin"):
             candidates = cli._platform_process_candidates()
@@ -160,6 +184,13 @@ class CliCoreTests(unittest.TestCase):
                 "--no-open",
             ],
         )
+
+    def test_ui_service_command_base_uses_frozen_executable_without_script_path(self):
+        frozen_executable = "/Applications/Codex Account Manager.app/Contents/Resources/core/codex-account"
+
+        with mock.patch.object(cli.sys, "executable", frozen_executable):
+            with mock.patch.object(cli.sys, "frozen", True, create=True):
+                self.assertEqual(cli._ui_service_command_base(), [frozen_executable])
 
     @mock.patch("codex_account_manager.cli._ui_service_command_base")
     def test_build_ui_restart_helper_command_keeps_interpreter_and_script(self, mock_base):
@@ -556,13 +587,13 @@ class CliCoreTests(unittest.TestCase):
             "repo_url": cli.PROJECT_RELEASES_URL,
             "releases": [
                 {"tag": "v9.9.9-rc1", "version": "v9.9.9-rc1", "title": "v9.9.9-rc1", "published_at": "2026-04-23T10:00:00Z", "body": "rc", "highlights": [], "url": "", "is_prerelease": True, "is_draft": False, "is_current": False, "source": "github"},
-                {"tag": "v0.0.21", "version": "v0.0.21", "title": "v0.0.21", "published_at": "2026-04-22T10:00:00Z", "body": "stable", "highlights": [], "url": "", "is_prerelease": False, "is_draft": False, "is_current": False, "source": "github"},
+                {"tag": "v9.9.8", "version": "v9.9.8", "title": "v9.9.8", "published_at": "2026-04-22T10:00:00Z", "body": "stable", "highlights": [], "url": "", "is_prerelease": False, "is_draft": False, "is_current": False, "source": "github"},
             ],
         }
         status = cli.build_update_status_payload(payload)
         self.assertTrue(status["update_available"])
-        self.assertEqual(status["latest_version"], "v0.0.21")
-        self.assertEqual((status["latest_release"] or {}).get("tag"), "v0.0.21")
+        self.assertEqual(status["latest_version"], "v9.9.8")
+        self.assertEqual((status["latest_release"] or {}).get("tag"), "v9.9.8")
 
     def test_update_status_returns_no_update_when_versions_match(self):
         payload = {
@@ -1097,6 +1128,95 @@ class CliCoreTests(unittest.TestCase):
         meta = json.loads((cli.PROFILES_DIR / "acc4" / "meta.json").read_text(encoding="utf-8"))
         self.assertEqual(saved["tokens"]["access_token"], "live-access")
         self.assertIn("last_synced_at", meta)
+
+    def test_usage_row_does_not_select_ambiguous_principal_without_unique_email(self):
+        self._write_profile_auth(
+            "acc4",
+            {
+                "tokens": {
+                    "access_token": "saved-access-a",
+                    "id_token": f"header.{self._jwt_payload({'email': 'a@example.com', 'sub': 'shared-sub'})}.sig",
+                }
+            },
+            account_hint="a@example.com",
+        )
+        self._write_profile_auth(
+            "acc5",
+            {
+                "tokens": {
+                    "access_token": "saved-access-b",
+                    "id_token": f"header.{self._jwt_payload({'email': 'b@example.com', 'sub': 'shared-sub'})}.sig",
+                }
+            },
+            account_hint="b@example.com",
+        )
+        cli.AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        cli.AUTH_FILE.write_text(
+            json.dumps(
+                {
+                    "tokens": {
+                        "access_token": "live-access",
+                        "id_token": f"header.{self._jwt_payload({'email': 'unknown@example.com', 'sub': 'shared-sub'})}.sig",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with mock.patch(
+            "codex_account_manager.cli.fetch_usage_from_auth",
+            return_value=((90, None), (80, None), "plus", True, None),
+        ):
+            payload = cli.collect_usage_local_data(timeout_sec=1)
+
+        self.assertIsNone(payload["current_profile"])
+        self.assertFalse(any(bool(row.get("is_current")) for row in payload.get("profiles") or []))
+
+    def test_usage_row_resolves_ambiguous_principal_with_unique_email(self):
+        self._write_profile_auth(
+            "acc4",
+            {
+                "tokens": {
+                    "access_token": "saved-access-a",
+                    "id_token": f"header.{self._jwt_payload({'email': 'a@example.com', 'sub': 'shared-sub'})}.sig",
+                }
+            },
+            account_hint="a@example.com",
+        )
+        self._write_profile_auth(
+            "acc5",
+            {
+                "tokens": {
+                    "access_token": "saved-access-b",
+                    "id_token": f"header.{self._jwt_payload({'email': 'b@example.com', 'sub': 'shared-sub'})}.sig",
+                }
+            },
+            account_hint="b@example.com",
+        )
+        cli.AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        cli.AUTH_FILE.write_text(
+            json.dumps(
+                {
+                    "tokens": {
+                        "access_token": "live-access",
+                        "id_token": f"header.{self._jwt_payload({'email': 'b@example.com', 'sub': 'shared-sub'})}.sig",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with mock.patch(
+            "codex_account_manager.cli.fetch_usage_from_auth",
+            return_value=((90, None), (80, None), "plus", True, None),
+        ):
+            payload = cli.collect_usage_local_data(timeout_sec=1)
+
+        self.assertEqual(payload["current_profile"], "acc5")
+        acc4 = json.loads((cli.PROFILES_DIR / "acc4" / "auth.json").read_text(encoding="utf-8"))
+        acc5 = json.loads((cli.PROFILES_DIR / "acc5" / "auth.json").read_text(encoding="utf-8"))
+        self.assertEqual(acc4["tokens"]["access_token"], "saved-access-a")
+        self.assertEqual(acc5["tokens"]["access_token"], "live-access")
 
     def test_import_analysis_rejects_unsupported_manifest_version(self):
         self._write_profile("work", email="work@example.com", account_id="acc-work")

@@ -173,6 +173,35 @@ test("buildTrayMenuTemplate includes readable color-coded desktop status actions
   assert.equal(items[2].enabled, false);
 });
 
+test("buildTrayMenuTemplate uses native menu icons for status rows when image support is available", () => {
+  const createFromDataURLCalls = [];
+  const items = buildTrayMenuTemplate({
+    platform: "linux",
+    summary: {
+      available: true,
+      profileName: "acc6",
+      fiveHourPercent: 48,
+      weeklyPercent: 78,
+    },
+    nativeImage: {
+      createFromDataURL(dataUrl) {
+        createFromDataURLCalls.push(dataUrl);
+        return { dataUrl };
+      },
+    },
+    onOpen: () => {},
+    onOpenWebPanel: () => {},
+    onRefresh: () => {},
+    onNotify: () => {},
+    onRestartService: () => {},
+    onQuit: () => {},
+  });
+
+  assert.equal(createFromDataURLCalls.length, 2);
+  assert.equal(items[1].icon.dataUrl, createFromDataURLCalls[0]);
+  assert.equal(items[2].icon.dataUrl, createFromDataURLCalls[1]);
+});
+
 test("buildTrayMenuTemplate uses native macOS headers for status rows when supported", () => {
   const items = buildTrayMenuTemplate({
     platform: "darwin",
@@ -224,8 +253,8 @@ test("buildTrayMenuTemplate falls back to a grouped macOS submenu when header it
   assert.deepEqual(
     items[0].submenu.map((item) => ({ label: item.label, enabled: item.enabled, icon: item.icon })),
     [
-      { label: "🟠 5H 48% left", enabled: false, icon: undefined },
-      { label: "🟢 Weekly 78% left", enabled: false, icon: undefined },
+      { label: "5H 48% left", enabled: false, icon: undefined },
+      { label: "Weekly 78% left", enabled: false, icon: undefined },
     ],
   );
 });
@@ -345,7 +374,7 @@ test("prepareTrayIcon resizes the Windows tray image to a compact 16px icon", ()
 });
 
 test("resolveTrayIconPath prefers the dedicated tray asset on macOS and Windows", () => {
-  assert.match(resolveTrayIconPath("darwin"), /codex-account-manager-tray\.svg$/);
+  assert.match(resolveTrayIconPath("darwin"), /codex-account-manager-tray\.png$/);
   assert.match(resolveTrayIconPath("win32"), /codex-account-manager-win\.ico$/);
   assert.match(resolveTrayIconPath("linux"), /codex-account-manager\.png$/);
 });

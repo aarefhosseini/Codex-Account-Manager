@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   buildBootstrapInstallPlan,
   buildPythonRuntimeInstallPlan,
+  candidateCoreCommands,
   extractCommandErrorDetail,
   detectPython,
   detectPipx,
@@ -23,6 +24,50 @@ test("buildBootstrapInstallPlan installs pipx and the Python core through the se
     ["Install pipx", "/usr/bin/python3", ["-m", "pip", "install", "--user", "--break-system-packages", "pipx"]],
     ["Install Codex Account Manager", "/usr/bin/python3", ["-m", "pipx", "install", "--force", "git+https://github.com/alisinaee/Codex-Account-Manager.git@main"]],
   ]);
+});
+
+test("candidateCoreCommands prefers env override then bundled core before legacy paths", () => {
+  const commands = candidateCoreCommands({
+    platform: "darwin",
+    env: { CAM_ELECTRON_CORE_COMMAND: "/repo/bin/codex-account-dev" },
+    storedState: { commandPath: "/Users/test/.local/bin/codex-account" },
+    resourcesPath: "/Applications/Codex Account Manager.app/Contents/Resources",
+    fsImpl: {
+      existsSync: (target) => target.endsWith("/core/codex-account"),
+    },
+  });
+
+  assert.equal(commands[0], "/repo/bin/codex-account-dev");
+  assert.equal(commands[1], "/Applications/Codex Account Manager.app/Contents/Resources/core/codex-account");
+  assert.ok(commands.indexOf("/Users/test/.local/bin/codex-account") > 1);
+});
+
+test("candidateCoreCommands resolves Windows bundled executable", () => {
+  const commands = candidateCoreCommands({
+    platform: "win32",
+    env: {},
+    storedState: {},
+    resourcesPath: "C:\\Program Files\\Codex Account Manager\\resources",
+    fsImpl: {
+      existsSync: (target) => target.endsWith("\\core\\codex-account.exe"),
+    },
+  });
+
+  assert.equal(commands[0], "C:\\Program Files\\Codex Account Manager\\resources\\core\\codex-account.exe");
+});
+
+test("candidateCoreCommands resolves Linux bundled executable", () => {
+  const commands = candidateCoreCommands({
+    platform: "linux",
+    env: {},
+    storedState: {},
+    resourcesPath: "/opt/Codex Account Manager/resources",
+    fsImpl: {
+      existsSync: (target) => target.endsWith("/core/codex-account"),
+    },
+  });
+
+  assert.equal(commands[0], "/opt/Codex Account Manager/resources/core/codex-account");
 });
 
 test("buildPythonRuntimeInstallPlan uses winget on Windows", () => {
@@ -169,6 +214,117 @@ test("resolveRuntimeStatus reports core_missing when Python is available but cod
   assert.equal(runtime.phase, "core_missing");
   assert.equal(runtime.python.version, "3.11.9");
   assert.equal(runtime.core.installed, false);
+});
+
+test("resolveRuntimeStatus uses bundled core without requiring system Python", async () => {
+  const runtime = await resolveRuntimeStatus({
+    platform: "darwin",
+    env: {},
+    resourcesPath: "/Applications/Codex Account Manager.app/Contents/Resources",
+    requireBundledCore: true,
+    loadStoredRuntimeState: () => ({ commandPath: "/Users/test/.local/bin/codex-account" }),
+    fsImpl: {
+      existsSync: (target) => target.endsWith("/core/codex-account"),
+    },
+    detectPython: async () => {
+      throw new Error("system python should not be probed for bundled core");
+    },
+    runDoctor: async (commandPath) => {
+      if (commandPath !== "/Applications/Codex Account Manager.app/Contents/Resources/core/codex-account") {
+        return null;
+      }
+      return {
+        python: { available: true, supported: true, version: "3.13.13", path: commandPath, command: "bundled" },
+        core: {
+          installed: true,
+          version: "0.0.21",
+          command_path: commandPath,
+          min_supported_version: "0.0.21",
+          meets_minimum_version: true,
+        },
+        ui_service: {
+          running: false,
+          healthy: false,
+          host: "127.0.0.1",
+          port: 4673,
+          base_url: "http://127.0.0.1:4673/",
+          token: "",
+        },
+        errors: [],
+      };
+    },
+  });
+
+  assert.equal(runtime.phase, "ready");
+  assert.equal(runtime.core.commandPath, "/Applications/Codex Account Manager.app/Contents/Resources/core/codex-account");
+  assert.equal(runtime.python.command, "bundled");
+});
+
+test("resolveRuntimeStatus reports packaging error when packaged app has no bundled core", async () => {
+  const runtime = await resolveRuntimeStatus({
+    platform: "darwin",
+    env: {},
+    resourcesPath: "/Applications/Codex Account Manager.app/Contents/Resources",
+    requireBundledCore: true,
+    loadStoredRuntimeState: () => ({ commandPath: "/Users/test/.local/bin/codex-account" }),
+    fsImpl: { existsSync: () => false },
+    detectPython: async () => ({
+      available: true,
+      supported: true,
+      version: "3.14.4",
+      path: "/opt/homebrew/bin/python3",
+      command: "/opt/homebrew/bin/python3",
+    }),
+    runDoctor: async () => null,
+  });
+
+  assert.equal(runtime.phase, "error");
+  assert.equal(runtime.reason, "bundled_core_missing");
+  assert.equal(runtime.core.installed, false);
+  assert.ok(runtime.errors.some((row) => row.code === "BUNDLED_CORE_MISSING"));
+});
+
+test("resolveRuntimeStatus keeps env override ahead of bundled core", async () => {
+  const runtime = await resolveRuntimeStatus({
+    platform: "darwin",
+    env: { CAM_ELECTRON_CORE_COMMAND: "/repo/bin/codex-account-dev" },
+    resourcesPath: "/Applications/Codex Account Manager.app/Contents/Resources",
+    requireBundledCore: true,
+    loadStoredRuntimeState: () => ({}),
+    fsImpl: {
+      existsSync: (target) => target.endsWith("/core/codex-account"),
+    },
+    detectPython: async () => {
+      throw new Error("system python should not be probed for env override");
+    },
+    runDoctor: async (commandPath) => {
+      if (commandPath !== "/repo/bin/codex-account-dev") {
+        return null;
+      }
+      return {
+        python: { available: true, supported: true, version: "3.14.4", path: "/opt/homebrew/bin/python3" },
+        core: {
+          installed: true,
+          version: "0.0.21",
+          command_path: "/Applications/Codex Account Manager.app/Contents/Resources/core/codex-account",
+          min_supported_version: "0.0.21",
+          meets_minimum_version: true,
+        },
+        ui_service: {
+          running: false,
+          healthy: false,
+          host: "127.0.0.1",
+          port: 4673,
+          base_url: "http://127.0.0.1:4673/",
+          token: "",
+        },
+        errors: [],
+      };
+    },
+  });
+
+  assert.equal(runtime.phase, "ready");
+  assert.equal(runtime.core.commandPath, "/repo/bin/codex-account-dev");
 });
 
 test("resolveRuntimeStatus uses the stored command path when PATH lookup is stale", async () => {

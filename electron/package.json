@@ -15,6 +15,12 @@
       "assets/**",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "build/python-core/core",
+        "to": "core"
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "assets/codex-account-manager.icns"
@@ -47,11 +53,13 @@
     "dev": "node scripts/dev.js",
     "build": "npm run build:renderer",
     "build:renderer": "vite build",
-    "dist": "npm run build:renderer && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",
-    "dist:dir": "npm run build:renderer && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir",
-    "dist:mac": "npm run build:renderer && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
-    "dist:win": "npm run build:renderer && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
-    "dist:linux": "npm run build:renderer && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux",
+    "build:python-core": "node scripts/build-python-core.js",
+    "verify:python-core": "node scripts/verify-python-core.js",
+    "dist": "npm run build:renderer && npm run build:python-core && npm run verify:python-core && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",
+    "dist:dir": "npm run build:renderer && npm run build:python-core && npm run verify:python-core && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir",
+    "dist:mac": "npm run build:renderer && npm run build:python-core && npm run verify:python-core && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
+    "dist:win": "npm run build:renderer && npm run build:python-core && npm run verify:python-core && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
+    "dist:linux": "npm run build:renderer && npm run build:python-core && npm run verify:python-core && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux",
     "smoke:prod": "npm run build:renderer && node scripts/smoke.js",
     "test": "node --test tests/*.test.js",
     "test:e2e": "npm run build && playwright test"

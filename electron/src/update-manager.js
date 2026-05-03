@@ -187,6 +187,7 @@ function buildUnifiedUpdateStatus({
   pendingUpdate = null,
   updaterDevMode = false,
   platform = process.platform,
+  bundledCoreAuthoritative = false,
 } = {}) {
   const currentVersion = withVersionPrefix(appVersion);
   const currentCoreVersion = withVersionPrefix(runtimeState?.core?.version);
@@ -199,7 +200,12 @@ function buildUnifiedUpdateStatus({
   const pendingTarget = withVersionPrefix(pending?.targetVersion);
   const coreVersionMatchesApp = Boolean(currentCoreVersion) && compareVersions(currentCoreVersion, currentVersion) === 0;
   const coreInstalled = Boolean(runtimeState?.core?.installed);
-  const coreUpdateNeeded = !desktopUpdateNeeded && (!coreInstalled || !coreVersionMatchesApp);
+  const bundledCoreRequiresReinstall = Boolean(bundledCoreAuthoritative)
+    && !desktopUpdateNeeded
+    && (!coreInstalled || !coreVersionMatchesApp);
+  const coreUpdateNeeded = !bundledCoreAuthoritative
+    && !desktopUpdateNeeded
+    && (!coreInstalled || !coreVersionMatchesApp);
   const installerAwaiting = Boolean(pending?.awaitingDesktopInstall);
   const pendingDesktopInstallStillNeeded = installerAwaiting
     && Boolean(pendingTarget)
@@ -214,8 +220,9 @@ function buildUnifiedUpdateStatus({
   const recommendedPythonVersion = normalizeVersion(releasePython?.version);
   const pythonAvailable = Boolean(runtimePython.available);
   const pythonSupported = Boolean(runtimePython.supported);
-  const systemPythonRequired = !pythonAvailable || !pythonSupported;
-  const systemPythonOptional = !systemPythonRequired
+  const systemPythonRequired = !bundledCoreAuthoritative && (!pythonAvailable || !pythonSupported);
+  const systemPythonOptional = !bundledCoreAuthoritative
+    && !systemPythonRequired
     && Boolean(recommendedPythonVersion)
     && compareVersions(recommendedPythonVersion, currentPythonVersion) > 0;
   const systemPythonSelected = Boolean(pending?.systemPythonSelected) || systemPythonRequired;
@@ -251,6 +258,11 @@ function buildUnifiedUpdateStatus({
     statusText = currentPythonVersion
       ? `System Python ${currentPythonVersion} is unsupported. Install Python 3.11+ before finishing the update.`
       : "System Python 3.11+ must be installed before the update can continue.";
+  } else if (bundledCoreRequiresReinstall) {
+    status = "bundled_core_reinstall_required";
+    statusText = currentCoreVersion
+      ? `Bundled Python core ${currentCoreVersion} does not match desktop app ${currentVersion}. Reinstall the desktop app.`
+      : `Bundled Python core is missing from desktop app ${currentVersion}. Reinstall the desktop app.`;
   } else if (coreUpdateNeeded) {
     status = "core_update_required";
     statusText = currentCoreVersion
@@ -279,6 +291,7 @@ function buildUnifiedUpdateStatus({
       || pendingCoreSyncStillNeeded,
     desktop_update_needed: desktopUpdateNeeded,
     core_update_needed: coreUpdateNeeded,
+    bundled_core_reinstall_required: bundledCoreRequiresReinstall,
     core_version: currentCoreVersion || "-",
     target_version: latestVersion || pendingTarget || currentVersion || "",
     latest_release: releaseIsNewerThanCurrent ? latestRelease : null,

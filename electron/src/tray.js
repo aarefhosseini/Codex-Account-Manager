@@ -18,6 +18,17 @@ function buildStatusIconDataUrl(tone = "neutral") {
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 }
 
+function buildStatusMenuIcon(tone, nativeImage) {
+  if (!nativeImage?.createFromDataURL) {
+    return undefined;
+  }
+  try {
+    return nativeImage.createFromDataURL(buildStatusIconDataUrl(tone));
+  } catch {
+    return undefined;
+  }
+}
+
 function compactProfileName(name) {
   const value = String(name || "").trim();
   if (!value) return "";
@@ -37,18 +48,12 @@ function colorizeMacTitleValue(label, value) {
   return `${label} ${toneAnsiColor(value)}${toPercentLabel(value)}\u001b[0m`;
 }
 
-function statusItem(label, tone, platform) {
-  const marker = tone === "danger"
-    ? "🔴"
-    : tone === "warning"
-      ? "🟠"
-      : tone === "caution"
-        ? "🟡"
-        : tone === "good"
-          ? "🟢"
-          : "⚪";
-  const prefixedLabel = `${marker} ${label}`;
-  return { label: prefixedLabel, enabled: false };
+function statusItem(label, tone, _platform, options = {}) {
+  const icon = buildStatusMenuIcon(tone, options.nativeImage);
+  if (icon) {
+    return { label, enabled: false, icon };
+  }
+  return { label, enabled: false };
 }
 
 function parseMacMajorVersion(version) {
@@ -62,16 +67,17 @@ function supportsMacTrayHeaders(version) {
 
 function buildTrayStatusItems(summary = {}, platform = process.platform, options = {}) {
   const profileName = compactProfileName(summary.profileName);
+  const nativeImage = options.nativeImage;
   if (!summary.available) {
-    return [statusItem("Usage unavailable", "neutral", platform)];
+    return [statusItem("Usage unavailable", "neutral", platform, { nativeImage })];
   }
   const macSystemVersion = String(
     options.macSystemVersion
     || (typeof process.getSystemVersion === "function" ? process.getSystemVersion() : ""),
   ).trim();
   const usageItems = [
-    statusItem(`5H ${toPercentLabel(summary.fiveHourPercent)} left`, buildStatusTone(summary.fiveHourPercent), platform),
-    statusItem(`Weekly ${toPercentLabel(summary.weeklyPercent)} left`, buildStatusTone(summary.weeklyPercent), platform),
+    statusItem(`5H ${toPercentLabel(summary.fiveHourPercent)} left`, buildStatusTone(summary.fiveHourPercent), platform, { nativeImage }),
+    statusItem(`Weekly ${toPercentLabel(summary.weeklyPercent)} left`, buildStatusTone(summary.weeklyPercent), platform, { nativeImage }),
   ];
   if (platform === "darwin" && supportsMacTrayHeaders(macSystemVersion)) {
     return [
@@ -97,6 +103,7 @@ function buildTrayMenuTemplate(actions = {}) {
   const platform = actions.platform || process.platform;
   const statusItems = buildTrayStatusItems(summary, platform, {
     macSystemVersion: actions.macSystemVersion,
+    nativeImage: actions.nativeImage,
   });
   return [
     ...statusItems,
@@ -135,7 +142,7 @@ function applyTrayState({ tray, Menu, summary, actions, nativeImage }) {
   if (process.platform === "darwin" && typeof tray.setTitle === "function") {
     tray.setTitle(buildMacMenuBarTitle(summary), { fontType: "monospacedDigit" });
   }
-  tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate({ ...actions, summary })));
+  tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate({ ...actions, summary, nativeImage })));
 }
 
 function prepareTrayIcon(image, platform = process.platform) {

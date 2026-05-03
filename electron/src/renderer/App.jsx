@@ -1155,12 +1155,31 @@ function CurrentThemeIcon({ themeMode }) {
 function TopBar({ activeTitle, updateStatus, loading, themeMode, onCycleTheme, onRefresh, onRestart }) {
   const currentThemeMode = normalizeThemeMode(themeMode);
   const nextThemeMode = getNextThemeMode(currentThemeMode);
+  const updateBadgeLabel = (() => {
+    if (!updateStatus?.update_available) return "";
+    if (updateStatus?.desktop_update_needed) {
+      return `Update ${updateStatus?.latest_version || "available"}`;
+    }
+    if (updateStatus?.bundled_core_reinstall_required) {
+      return "Reinstall app";
+    }
+    if (updateStatus?.core_update_needed || updateStatus?.status === "core_sync_pending") {
+      return `Core sync ${updateStatus?.target_version || updateStatus?.current_version || "required"}`;
+    }
+    if (updateStatus?.system_python?.required) {
+      return "Python required";
+    }
+    if (updateStatus?.system_python?.optional) {
+      return `Python ${updateStatus?.system_python?.recommended_version || "update"} available`;
+    }
+    return `Update ${updateStatus?.latest_version || "available"}`;
+  })();
 
   return (
     <header className="topbar desktop-topbar">
       <div className="topbar-meta">
         <span className="topbar-section-title">{activeTitle}</span>
-        {updateStatus?.update_available && <Badge variant="warning">Update {updateStatus.latest_version || "available"}</Badge>}
+        {updateBadgeLabel ? <Badge variant="warning">{updateBadgeLabel}</Badge> : null}
       </div>
       <div className="top-actions">
         <ConfirmAction
@@ -1963,9 +1982,13 @@ function UpdateView({
 }) {
   const notes = Array.isArray(releaseNotes?.releases) ? releaseNotes.releases : [];
   const updateAvailable = !!updateStatus?.update_available;
+  const desktopUpdateNeeded = !!updateStatus?.desktop_update_needed;
+  const coreUpdateNeeded = !!updateStatus?.core_update_needed;
+  const bundledCoreReinstallRequired = !!updateStatus?.bundled_core_reinstall_required;
   const systemPython = updateStatus?.system_python || {};
   const updateTone = updateStatus?.desktop_update_needed
     || updateStatus?.core_update_needed
+    || bundledCoreReinstallRequired
     || systemPython.required
     ? "danger"
     : systemPython.optional
@@ -1973,17 +1996,19 @@ function UpdateView({
       : "good";
   const currentTone = updateAvailable ? "danger" : "good";
   const desktopAppTone = updateStatus?.desktop_update_needed ? "danger" : "good";
-  const coreTone = updateStatus?.core_update_needed ? "danger" : "good";
+  const coreTone = updateStatus?.core_update_needed || bundledCoreReinstallRequired ? "danger" : "good";
   const systemPythonTone = systemPython.required ? "danger" : (systemPython.optional ? "warning" : "good");
   const compactStatusSummary = systemPython.required
     ? "Python required"
     : updateStatus?.desktop_update_needed
       ? "Desktop update"
-      : updateStatus?.core_update_needed
-        ? "Core sync"
-        : systemPython.optional
-          ? "Optional Python"
-          : "Up to date";
+      : bundledCoreReinstallRequired
+        ? "Reinstall app"
+        : updateStatus?.core_update_needed
+          ? "Core sync"
+          : systemPython.optional
+            ? "Optional Python"
+            : "Up to date";
   const systemPythonSummary = systemPython.required
     ? "Required before Python core sync can finish."
     : systemPython.optional
@@ -1991,6 +2016,20 @@ function UpdateView({
       : systemPython.supported
         ? `Detected Python ${systemPython.version || "supported"}`
         : "Not detected";
+  const updateActionLabel = updating
+    ? "Updating"
+    : desktopUpdateNeeded
+      ? "Update now"
+      : bundledCoreReinstallRequired
+        ? "Reinstall app"
+      : coreUpdateNeeded
+        ? "Sync core now"
+        : systemPython.required
+          ? "Install Python"
+          : systemPython.optional
+            ? "Update Python"
+            : "Update now";
+  const updateActionVariant = desktopUpdateNeeded ? "primary" : "secondary";
 
   return (
     <section className="view update-view">
@@ -2024,7 +2063,7 @@ function UpdateView({
             </div>
             <div className={`update-layer-item tone-${coreTone}`}>
               <span className="update-layer-item-label">Python core</span>
-              <span className="update-layer-item-value">{updateStatus?.core_update_needed ? `Sync to ${updateStatus?.target_version || updateStatus?.current_version || "current build"}` : `Core ${updateStatus?.core_version || "-"}`}</span>
+              <span className="update-layer-item-value">{bundledCoreReinstallRequired ? "Reinstall desktop app" : updateStatus?.core_update_needed ? `Sync to ${updateStatus?.target_version || updateStatus?.current_version || "current build"}` : `Core ${updateStatus?.core_version || "-"}`}</span>
             </div>
             <div className={`update-layer-item tone-${systemPythonTone} ${systemPython.required ? "required" : ""}`}>
               <span className="update-layer-item-label">System Python</span>
@@ -2047,11 +2086,16 @@ function UpdateView({
               {!systemPython.auto_update_supported ? " This platform uses a manual installer handoff." : ""}
             </div>
           ) : null}
+          {bundledCoreReinstallRequired ? (
+            <div className="workspace-error-inline">
+              The packaged app did not include the expected bundled Python core. Reinstall the desktop app.
+            </div>
+          ) : null}
           {checking ? <div className="update-inline-loading" role="status" aria-live="polite">Checking for updates…</div> : null}
           <div className="settings-inline-actions">
             <Button loading={checking} onClick={onCheck} disabled={checking}>Check for updates</Button>
-            <Button variant={updateAvailable ? "primary" : "secondary"} loading={updating} onClick={onRunUpdate} disabled={!updateAvailable || checking || updating}>
-              {updating ? "Updating" : "Update now"}
+            <Button variant={updateAvailable ? updateActionVariant : "secondary"} loading={updating} onClick={onRunUpdate} disabled={!updateAvailable || checking || updating}>
+              {updateActionLabel}
             </Button>
           </div>
         </SectionCard>
@@ -2428,8 +2472,11 @@ function RuntimeSetupView({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [copyState, setCopyState] = useState("");
   const autoResumeKeyRef = useRef("");
+  const bundledCoreProblem = runtimeStatus?.reason === "bundled_core_missing"
+    || runtimeStatus?.reason === "bundled_core_unusable";
   const heading = phase === "python_missing" ? "Install Python"
     : phase === "service_starting" ? "Starting local service"
+      : bundledCoreProblem ? "Reinstall Desktop App"
       : phase === "error" && runtimeStatus?.reason === "core_update_required" ? "Update Python Core"
         : "Set up Python Core";
 
@@ -2444,7 +2491,7 @@ function RuntimeSetupView({
     : (phase === "service_starting" || busy || phase === "core_missing" || phase === "python_missing")
       ? "warning"
       : "success";
-  const hasPython = Boolean(runtimeStatus?.python?.supported);
+  const hasPython = bundledCoreProblem ? true : Boolean(runtimeStatus?.python?.supported);
   const hasCore = Boolean(runtimeStatus?.core?.installed);
   const hasBackend = Boolean(runtimeStatus?.uiService?.running);
 
@@ -2522,6 +2569,8 @@ function RuntimeSetupView({
       : `${progressPercent}% complete`;
   const infoMessage = phase === "python_missing"
     ? "Python 3.11 or newer is required before the desktop app can continue."
+    : bundledCoreProblem
+      ? "The packaged desktop app is missing or cannot start its bundled Python core. Reinstall the desktop app."
     : phase === "core_missing"
       ? "Install the Python core to unlock the desktop app."
       : runtimeStatus?.reason === "backend_start_failed"
@@ -2537,6 +2586,8 @@ function RuntimeSetupView({
       onClick: onInstallPython || (() => onOpenExternal(pythonInstallUrl)),
       disabled: busy || (!onInstallPython && !pythonInstallUrl),
     }
+    : bundledCoreProblem
+      ? { label: "Retry", onClick: onRetry, disabled: busy }
     : phase === "service_starting" || runtimeStatus?.reason === "backend_start_failed"
       ? { label: "Start Service", onClick: onStartBackend, disabled: busy }
       : { label: "Install Core", onClick: onInstallCore, disabled: busy };
@@ -2753,6 +2804,7 @@ function AppContent() {
 
   const activeTitle = useMemo(() => views.find((view) => view.id === activeView)?.label || "Profiles", [activeView]);
   const updateAvailable = !!updateStatus?.update_available;
+  const desktopUpdateAvailable = !!updateStatus?.desktop_update_needed;
   const visibleColumns = useMemo(() => normalizeColumns(columnPrefs), [columnPrefs]);
   const normalizedColumnWidthOverrides = useMemo(
     () => normalizeProfileColumnWidthOverrides(columnWidthOverrides),
@@ -4504,7 +4556,7 @@ function AppContent() {
         canToggle={!compactMode}
         onModeChange={setSidebarMode}
         onNavigate={(view) => setActiveView(normalizeViewId(view))}
-        updateAvailable={updateAvailable}
+        updateAvailable={desktopUpdateAvailable}
         version={desktopVersion}
         updaterDevMode={updaterDevMode}
         onExit={requestExit}

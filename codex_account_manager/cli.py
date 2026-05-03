@@ -60,8 +60,18 @@ CAM_LOG_FILE = CAM_DIR / "ui.log"
 CAM_LOG_MAX_BYTES = 2 * 1024 * 1024
 CAM_LOG_BACKUPS = 4
 APP_CANDIDATES = ("Codex", "CodexBar")
-UI_BUILD_VERSION = hashlib.sha1(f"{Path(__file__).resolve()}:{Path(__file__).stat().st_mtime_ns}".encode("utf-8")).hexdigest()[:12]
 DEFAULT_APP_VERSION = "0.0.21"
+
+
+def _build_ui_version(file_path: str = __file__) -> str:
+    path = Path(file_path).resolve()
+    try:
+        version_seed = f"{path}:{path.stat().st_mtime_ns}"
+    except OSError:
+        version_seed = f"{path}:frozen:{DEFAULT_APP_VERSION}"
+    return hashlib.sha1(version_seed.encode("utf-8")).hexdigest()[:12]
+
+UI_BUILD_VERSION = _build_ui_version()
 AUTO_SWITCH_MIN_INTERNAL_COOLDOWN_SEC = 20
 PROFILE_ARCHIVE_VERSION = 1
 PROFILE_ARCHIVE_EXT = ".camzip"
@@ -2870,6 +2880,13 @@ def _build_usage_profile_context(config: dict | None = None):
 
     current_profile = None
     current_profile_match = None
+
+    def matches_active_email(profile_name: str) -> bool:
+        if not active_email:
+            return False
+        profile_email = str((profile_meta.get(profile_name) or {}).get("email") or "").strip().lower()
+        return bool(profile_email and profile_email == active_email)
+
     for p in profiles:
         profile_canonical = (profile_meta.get(p.name) or {}).get("canonical")
         if active_canonical is not None and profile_canonical and profile_canonical == active_canonical:
@@ -2877,18 +2894,24 @@ def _build_usage_profile_context(config: dict | None = None):
             current_profile_match = "canonical"
             break
     if current_profile is None and active_principal_id:
-        for p in profiles:
-            if str((profile_meta.get(p.name) or {}).get("principal_id") or "") == str(active_principal_id):
-                current_profile = p.name
+        principal_matches = [
+            p.name
+            for p in profiles
+            if str((profile_meta.get(p.name) or {}).get("principal_id") or "") == str(active_principal_id)
+        ]
+        if len(principal_matches) == 1:
+            current_profile = principal_matches[0]
+            current_profile_match = "principal"
+        elif len(principal_matches) > 1:
+            email_scoped_matches = [name for name in principal_matches if matches_active_email(name)]
+            if len(email_scoped_matches) == 1:
+                current_profile = email_scoped_matches[0]
                 current_profile_match = "principal"
-                break
     if current_profile is None and active_email:
-        for p in profiles:
-            profile_email = str((profile_meta.get(p.name) or {}).get("email") or "").strip().lower()
-            if profile_email and profile_email == active_email:
-                current_profile = p.name
-                current_profile_match = "email"
-                break
+        email_matches = [p.name for p in profiles if matches_active_email(p.name)]
+        if len(email_matches) == 1:
+            current_profile = email_matches[0]
+            current_profile_match = "email"
 
     return {
         "profiles": profiles,
@@ -3451,10 +3474,13 @@ def detect_python_runtime() -> dict:
 
 
 def detect_core_runtime(command_name: str = "codex-account") -> dict:
-    command_path = shutil.which(command_name)
     argv0 = str(Path(sys.argv[0]).resolve()) if sys.argv and sys.argv[0] else ""
-    installed = bool(command_path or argv0)
-    resolved = str(command_path or argv0)
+    if getattr(sys, "frozen", False):
+        resolved = str(Path(sys.executable).resolve())
+    else:
+        command_path = shutil.which(command_name)
+        resolved = str(command_path or argv0)
+    installed = bool(resolved)
     return {
         "installed": installed,
         "version": APP_VERSION if installed else "",
@@ -5885,24 +5911,7 @@ def cmd_ui(host: str, port: int, no_open: bool, interval_sec: float, idle_timeou
         finally:
             clear_ui_pid_info()
 
-    script = str(Path(__file__).resolve())
-    cmd = [
-        sys.executable,
-        script,
-        "ui",
-        "--host",
-        use_host,
-        "--port",
-        str(port),
-        "--interval",
-        str(interval_sec),
-        "--idle-timeout",
-        str(idle_timeout_sec),
-        "--serve",
-        "--token",
-        token,
-        "--no-open",
-    ]
+    cmd = _build_ui_serve_command(use_host, port, interval_sec, idle_timeout_sec, token)
     try:
         popen_kwargs = {
             "stdin": subprocess.DEVNULL,
@@ -6098,6 +6107,10 @@ def _autostart_label() -> str:
 
 
 def _ui_service_command_base() -> list[str]:
+    if bool(getattr(sys, "frozen", False)):
+        frozen_executable = str(sys.executable or "").strip()
+        if frozen_executable:
+            return [frozen_executable]
     script_path = str(Path(__file__).resolve())
     if sys.platform.startswith("win"):
         current_python = str(sys.executable or "").strip()
@@ -6116,6 +6129,24 @@ def _ui_service_command_base() -> list[str]:
     if python3_cmd:
         return [python3_cmd, script_path]
     return ["python", script_path]
+
+
+def _build_ui_serve_command(host: str, port: int, interval_sec: float, idle_timeout_sec: float, token: str) -> list[str]:
+    return _ui_service_command_base() + [
+        "ui",
+        "--host",
+        str(host or UI_DEFAULT_HOST),
+        "--port",
+        str(int(port or UI_DEFAULT_PORT)),
+        "--interval",
+        str(float(interval_sec)),
+        "--idle-timeout",
+        str(float(idle_timeout_sec)),
+        "--serve",
+        "--token",
+        str(token or ""),
+        "--no-open",
+    ]
 
 
 def _build_ui_service_restart_command(host: str, port: int, interval_sec: float, idle_timeout_sec: float) -> list[str]:

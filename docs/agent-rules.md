@@ -1,28 +1,34 @@
 # AI Agent Rules & Change Memory
 
 ## Project Snapshot
-
-- Python package source lives in `codex_account_manager/` with CLI and local web service behavior centered in `cli.py`.
-- Browser web UI assets live in `codex_account_manager/web/`.
-- Electron desktop app lives in `electron/` and uses Vite, Electron Builder, and Node test suites.
-- Release/version metadata is duplicated across `pyproject.toml`, `config.json`, Electron package files, runtime constants, and user-facing docs.
-- GitHub Releases are the primary binary distribution surface for desktop installers.
-- Private owner-specific AI workflow files can be mounted through `.private/ai` and are not required for public build or test flows.
+- Keep updates focused on architecture, behavior rules, and high-impact changes only.
+- Prefer short, implementation-focused bullets over narrative prose.
 
 ## Behavior Rules
-
 - Use `rtk` as the prefix for shell commands in this repository.
 - Use jCodeMunch MCP tools for code exploration when they can answer the question.
 - Preserve private owner-specific workflow files; do not require them for public repository build, test, or usage.
 - Before release completion claims, run fresh verification and report the actual command results.
+- Ensure we had script to deleted pre needed things first check it this wokr for current state or not i want to clean every thing and test install app from 0.
 
 ## Recent Changes (Last 20)
+### 2026-05-02T20:24:53+03:30
+- Changed files: `electron/src/main.js`, `electron/tests/menu-lifecycle.test.js`, `electron/tests/runtime.test.js`
+- Summary: Fix macOS status bar startup race by creating the Electron tray before runtime/backend startup, and isolate bundled-core runtime test from dev env overrides.
+- Behavior impact: Recorded code-level deltas for future AI context.
+<!-- fingerprint:c85c27a19f94 -->
 
-- 2026-05-01: Merged the Electron desktop branch into `main` and aligned release metadata for `v0.0.20`.
-- 2026-05-01: Cleared stale pending desktop update state when app and core already match, preventing false topbar update warnings.
-- 2026-05-01: Fixed Electron update status so stale older release feeds cannot downgrade the displayed latest version or Python core sync target.
-- 2026-05-01: Restored AI-facing project memory after the Electron merge removed the previous `docs/agent-rules.md`.
+### 2026-05-02T20:12:45+03:30
+- Changed files: `scripts/remove-all-required-for-installation-test.sh`, `scripts/remove-all-required-for-installation-test.ps1`
+- Summary: Updated installation-test cleanup scripts for bundled-core packaged app testing with dry-run, app removal, all-data, and dev-data modes.
+- Behavior impact: Added or refreshed 1 behavior rule(s) from user instructions.
+<!-- fingerprint:206439ec5e05 -->
+
+### 2026-05-02T20:01:34+03:30
+- Changed files: `codex_account_manager/cli.py`, `electron/package.json`, `electron/scripts/build-python-core.js`, `electron/scripts/verify-python-core.js`, `electron/requirements-python-core.txt`, `electron/src/main.js`, `electron/src/renderer/App.jsx`, `electron/src/runtime.js`, +5 more
+- Summary: Embed a PyInstaller-built app-private Python core into Electron packaging, prefer bundled runtime in packaged apps, and stop production pipx core sync paths.
+- Behavior impact: Recorded code-level deltas for future AI context.
+<!-- fingerprint:1087f2d3a70a -->
 
 ## Last Updated
-
-2026-05-01
+- 2026-05-02T20:24:53+03:30

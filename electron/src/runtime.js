@@ -266,15 +266,38 @@ function detectPython({ platform = process.platform, env = process.env, spawnSyn
   };
 }
 
-function candidateCoreCommands({ platform = process.platform, env = process.env, storedState = {} } = {}) {
+function platformPath(platform = process.platform) {
+  return platform === "win32" ? path.win32 : path.posix;
+}
+
+function resolveBundledCoreCommand({ platform = process.platform, resourcesPath = "", fsImpl = fs } = {}) {
+  const base = String(resourcesPath || "").trim();
+  if (!base) {
+    return "";
+  }
+  const pathImpl = platformPath(platform);
+  const command = pathImpl.join(base, "core", platform === "win32" ? "codex-account.exe" : "codex-account");
+  try {
+    return fsImpl.existsSync(command) ? command : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function candidateCoreCommands({ platform = process.platform, env = process.env, storedState = {}, resourcesPath = "", fsImpl = fs } = {}) {
   const home = os.homedir();
+  const pathImpl = platformPath(platform);
+  const bundledCore = resolveBundledCoreCommand({ platform, resourcesPath, fsImpl });
   const items = [
     env.CAM_ELECTRON_CORE_COMMAND,
+    bundledCore,
     storedState.commandPath,
     platform === "win32" ? "codex-account.exe" : "",
     platform === "win32" ? "codex-account.cmd" : "",
     "codex-account",
-    platform === "win32" ? path.join(home, ".local", "bin", "codex-account.exe") : path.join(home, ".local", "bin", "codex-account"),
+    platform === "win32"
+      ? pathImpl.join(home, ".local", "bin", "codex-account.exe")
+      : pathImpl.join(home, ".local", "bin", "codex-account"),
   ];
   return unique(items);
 }
@@ -361,6 +384,9 @@ function runDoctor(commandPath, { spawnSyncImpl = spawnSync } = {}) {
 async function resolveRuntimeStatus({
   env = process.env,
   platform = process.platform,
+  resourcesPath = "",
+  requireBundledCore = false,
+  fsImpl = fs,
   minCoreVersion = DEFAULT_MIN_CORE_VERSION,
   loadStoredRuntimeState: loadStoredStateImpl = () => ({}),
   detectPython: detectPythonImpl = detectPython,
@@ -371,6 +397,69 @@ async function resolveRuntimeStatus({
   }
 
   const storedState = loadStoredStateImpl() || {};
+  const explicitCoreCommand = String(env.CAM_ELECTRON_CORE_COMMAND || "").trim();
+  const bundledCoreCommand = resolveBundledCoreCommand({ platform, resourcesPath, fsImpl });
+  if (requireBundledCore && !explicitCoreCommand && !bundledCoreCommand) {
+    return normalizeRuntimeStatus({
+      phase: "error",
+      reason: "bundled_core_missing",
+      message: "The packaged desktop app is missing its bundled Python core. Reinstall Codex Account Manager.",
+      python: { available: false, supported: false, version: "", path: "", command: "" },
+      core: { installed: false, version: "", commandPath: "" },
+      uiService: getDefaultBackendState(),
+      errors: [{ code: "BUNDLED_CORE_MISSING", message: "The bundled Python core was not found in the app resources." }],
+    }, { minCoreVersion, platform });
+  }
+
+  const directCandidates = unique([explicitCoreCommand, bundledCoreCommand]);
+  for (const candidate of directCandidates) {
+    const doctor = await runDoctorImpl(candidate);
+    if (!doctor) {
+      continue;
+    }
+    const normalized = normalizeRuntimeStatus({
+      phase: "ready",
+      python: doctor.python || {
+        available: true,
+        supported: true,
+        version: "",
+        path: candidate,
+        command: "bundled",
+      },
+      core: {
+        ...doctor.core,
+        installed: true,
+        commandPath: candidate,
+        minSupportedVersion: doctor.core?.min_supported_version || minCoreVersion,
+        meetsMinimumVersion: doctor.core?.meets_minimum_version ?? isVersionAtLeast(doctor.core?.version || "", minCoreVersion),
+      },
+      uiService: doctor.ui_service || getDefaultBackendState(),
+      errors: doctor.errors || [],
+    }, { minCoreVersion, platform });
+    if (!normalized.core.meetsMinimumVersion) {
+      return {
+        ...normalized,
+        phase: "error",
+        reason: "core_update_required",
+        message: `Codex Account Manager core ${normalized.core.version || "unknown"} is older than the required ${normalized.core.minSupportedVersion}.`,
+        errors: [...normalized.errors, { code: "CORE_UPDATE_REQUIRED", message: "Update the desktop app before continuing." }],
+      };
+    }
+    return normalized;
+  }
+
+  if (requireBundledCore && bundledCoreCommand) {
+    return normalizeRuntimeStatus({
+      phase: "error",
+      reason: "bundled_core_unusable",
+      message: "The packaged desktop app could not start its bundled Python core. Reinstall Codex Account Manager.",
+      python: { available: false, supported: false, version: "", path: bundledCoreCommand, command: "bundled" },
+      core: { installed: false, version: "", commandPath: bundledCoreCommand },
+      uiService: getDefaultBackendState(),
+      errors: [{ code: "BUNDLED_CORE_UNUSABLE", message: "The bundled Python core did not return desktop diagnostics." }],
+    }, { minCoreVersion, platform });
+  }
+
   const python = await detectPythonImpl({ platform, env });
   if (!python.available || !python.supported) {
     const reason = !python.available ? "python_missing" : "python_unsupported";
@@ -387,7 +476,8 @@ async function resolveRuntimeStatus({
     }, { minCoreVersion, platform });
   }
 
-  const candidates = candidateCoreCommands({ platform, env, storedState });
+  const candidates = candidateCoreCommands({ platform, env, storedState, resourcesPath, fsImpl })
+    .filter((candidate) => !directCandidates.includes(candidate));
   for (const candidate of candidates) {
     const doctor = await runDoctorImpl(candidate);
     if (!doctor) {
@@ -828,6 +918,7 @@ async function installPythonRuntime(runtimeState, {
 module.exports = {
   buildBootstrapInstallPlan,
   buildPythonRuntimeInstallPlan,
+  candidateCoreCommands,
   compareVersionArrays,
   detectBrew,
   detectPipx,
@@ -843,6 +934,7 @@ module.exports = {
   normalizeRuntimeStatus,
   parseWingetPythonVersionFromId,
   pythonInstallUrl,
+  resolveBundledCoreCommand,
   resolveWindowsPythonWingetIds,
   resolveRuntimeStatus,
   runDoctor,
