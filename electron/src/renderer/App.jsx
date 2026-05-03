@@ -2912,10 +2912,31 @@ function AppContent() {
     });
   }
 
+  function readConfigRevision(config) {
+    const value = Number(config?._meta?.revision);
+    return Number.isFinite(value) ? value : null;
+  }
+
   function applyDesktopState(nextState, { backend = undefined, chain = undefined } = {}) {
-    setState(nextState);
-    stateRef.current = nextState;
-    configRevisionRef.current = Number(nextState?.config?._meta?.revision || configRevisionRef.current || 1);
+    const currentState = stateRef.current;
+    const incomingRevision = readConfigRevision(nextState?.config);
+    const currentRevision = readConfigRevision(currentState?.config);
+    const hasPendingConfigSave = pendingConfigSavesRef.current > 0;
+    const shouldPreserveCurrentConfig = (
+      currentState?.config
+      && (
+        (incomingRevision !== null && currentRevision !== null && incomingRevision < currentRevision)
+        || (incomingRevision === null && currentRevision !== null)
+        || hasPendingConfigSave
+      )
+    );
+    const mergedState = shouldPreserveCurrentConfig
+      ? { ...nextState, config: currentState.config }
+      : nextState;
+
+    setState(mergedState);
+    stateRef.current = mergedState;
+    configRevisionRef.current = Number(mergedState?.config?._meta?.revision || configRevisionRef.current || 1);
     if (backend !== undefined) {
       setBackendState(backend);
       backendStateRef.current = backend;
@@ -2923,13 +2944,13 @@ function AppContent() {
     if (chain !== undefined) {
       setAutoChain(normalizeChainPayload(chain));
     }
-    if (nextState?.config?.ui) {
-      setColumnPrefs(normalizeColumns(nextState.config.ui.column_prefs));
-      const nextResizeEnabled = normalizeColumnWidthResizeEnabled(nextState.config.ui.column_width_resize_enabled);
-      const nextWidthOverrides = normalizeProfileColumnWidthOverrides(nextState.config.ui.column_width_overrides);
+    if (mergedState?.config?.ui) {
+      setColumnPrefs(normalizeColumns(mergedState.config.ui.column_prefs));
+      const nextResizeEnabled = normalizeColumnWidthResizeEnabled(mergedState.config.ui.column_width_resize_enabled);
+      const nextWidthOverrides = normalizeProfileColumnWidthOverrides(mergedState.config.ui.column_width_overrides);
       setColumnWidthResizeEnabled(nextResizeEnabled);
       setColumnWidthOverrides(nextWidthOverrides);
-      saveStoredColumns(nextState.config.ui.column_prefs || defaultColumns);
+      saveStoredColumns(mergedState.config.ui.column_prefs || defaultColumns);
       saveStoredColumnWidthResizeEnabled(nextResizeEnabled);
       saveStoredColumnWidthOverrides(nextWidthOverrides);
     }
