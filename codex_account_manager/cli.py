@@ -1150,6 +1150,115 @@ def fetch_usage_from_auth(auth_path: Path, timeout_sec: int = 7):
     return usage_5h, usage_weekly, plan_type, is_paid, None
 
 
+def is_auth_expired_usage_error(err: str | None) -> bool:
+    normalized = str(err or "").strip().lower()
+    return normalized in {"http 401", "auth expired"} or "notauthenticated" in normalized
+
+
+def refresh_codex_auth_via_app_server(timeout_sec: int = 12):
+    try:
+        codex_cli = resolve_codex_cli()
+    except Exception as e:
+        return False, f"codex cli unavailable: {e}", None
+
+    messages = [
+        {
+            "method": "initialize",
+            "id": 0,
+            "params": {
+                "clientInfo": {
+                    "name": "codex_account_manager",
+                    "title": "Codex Account Manager",
+                    "version": APP_VERSION,
+                }
+            },
+        },
+        {"method": "initialized", "params": {}},
+        {"method": "account/read", "id": 1, "params": {"refreshToken": True}},
+    ]
+    stdin_text = "".join(json.dumps(msg, separators=(",", ":")) + "\n" for msg in messages)
+    try:
+        proc = _subprocess_run(
+            [codex_cli, "app-server", "--listen", "stdio://"],
+            input=stdin_text,
+            capture_output=True,
+            text=True,
+            timeout=max(3, int(timeout_sec)),
+        )
+    except subprocess.TimeoutExpired:
+        return False, "codex app-server refresh timed out", None
+    except Exception as e:
+        return False, f"codex app-server refresh failed: {e}", None
+
+    account_payload = None
+    error_text = ""
+    for line in str(proc.stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except Exception:
+            continue
+        if msg.get("id") != 1:
+            continue
+        if isinstance(msg.get("error"), dict):
+            error_text = str(msg["error"].get("message") or msg["error"])
+            break
+        result = msg.get("result")
+        if isinstance(result, dict):
+            account_payload = result.get("account")
+            break
+
+    if proc.returncode not in (0, None) and account_payload is None:
+        stderr_text = str(proc.stderr or "").strip().splitlines()
+        tail = stderr_text[-1] if stderr_text else f"exit {proc.returncode}"
+        return False, f"codex app-server refresh failed: {tail}", None
+    if error_text:
+        return False, error_text, None
+    if not isinstance(account_payload, dict):
+        return False, "codex app-server returned no active account", None
+    return True, "refreshed", account_payload
+
+
+def refresh_and_sync_live_auth_snapshot(
+    profile_name: str,
+    *,
+    expected_principal_id: str | None = None,
+    reason: str = "",
+    timeout_sec: int = 12,
+) -> bool:
+    ok, message, account_payload = refresh_codex_auth_via_app_server(timeout_sec=timeout_sec)
+    if not ok:
+        cam_log(
+            "warn",
+            "codex auth refresh failed",
+            {"profile": profile_name, "reason": reason, "error": message},
+        )
+        return False
+    synced = False
+    try:
+        synced = sync_profile_auth_snapshot(
+            profile_name,
+            AUTH_FILE,
+            str(AUTH_FILE),
+            expected_principal_id=str(expected_principal_id or ""),
+        )
+    except Exception as e:
+        cam_log(
+            "warn",
+            "codex auth refresh sync failed",
+            {"profile": profile_name, "reason": reason, "error": str(e)},
+        )
+        return False
+    cam_log(
+        "info",
+        "codex auth refreshed",
+        {"profile": profile_name, "reason": reason, "synced": bool(synced), "account": account_payload or {}},
+    )
+    return True
+
+
 def account_hint_from_auth(path: Path) -> str:
     try:
         data = load_json(path)
@@ -2959,6 +3068,17 @@ def _build_usage_profile_row(profile_dir: Path, context: dict, timeout_sec: int)
     account_id = str(entry.get("account_id", "-") or "-")
     principal_id = entry.get("principal_id")
     usage_5h, usage_weekly, plan_type, is_paid, err = fetch_usage_from_auth(auth_path, timeout_sec=timeout_sec)
+    if can_sync_live_auth and is_auth_expired_usage_error(err):
+        refreshed = refresh_and_sync_live_auth_snapshot(
+            p.name,
+            expected_principal_id=str(entry.get("principal_id") or ""),
+            reason="usage-http-401",
+            timeout_sec=max(8, int(timeout_sec) + 5),
+        )
+        if refreshed:
+            usage_5h, usage_weekly, plan_type, is_paid, err = fetch_usage_from_auth(AUTH_FILE, timeout_sec=timeout_sec)
+        else:
+            cam_log("warn", "usage auth expired", {"profile": p.name, "error": err})
     if can_sync_live_auth and err is None:
         try:
             sync_profile_auth_snapshot(
@@ -2969,6 +3089,12 @@ def _build_usage_profile_row(profile_dir: Path, context: dict, timeout_sec: int)
             )
         except Exception:
             pass
+    if err and is_auth_expired_usage_error(err):
+        cam_log(
+            "warn",
+            "usage auth expired",
+            {"profile": p.name, "is_current": bool(current_profile and p.name == current_profile), "error": err},
+        )
     cell_5h = format_usage_cell(*(usage_5h or (None, None)))
     cell_weekly = format_usage_cell(*(usage_weekly or (None, None)))
     same = bool(principal_id and int(principal_counts.get(str(principal_id), 0)) > 1)
@@ -3302,6 +3428,14 @@ def cmd_switch(name: str, restart_codex: bool) -> int:
             return 1
     _set_private_permissions(AUTH_FILE)
     _log_runtime_safe("info", "switch auth copied", {"name": name, "source_auth": str(source_auth), "target_auth": str(AUTH_FILE)})
+
+    switched_id = principal_id_from_auth(AUTH_FILE)
+    refresh_and_sync_live_auth_snapshot(
+        name,
+        expected_principal_id=switched_id,
+        reason="profile-switch",
+        timeout_sec=12,
+    )
 
     print(f"switched to profile '{name}'")
     print(f"active account: {account_hint_from_auth(AUTH_FILE)}")

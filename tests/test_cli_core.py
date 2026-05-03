@@ -1129,6 +1129,90 @@ class CliCoreTests(unittest.TestCase):
         self.assertEqual(saved["tokens"]["access_token"], "live-access")
         self.assertIn("last_synced_at", meta)
 
+    def test_usage_row_refreshes_current_auth_after_auth_expired(self):
+        token_payload = {"email": "same@example.com", "sub": "sub-4"}
+        self._write_profile_auth(
+            "acc4",
+            {
+                "tokens": {
+                    "access_token": "stale-access",
+                    "account_id": "acc-4",
+                    "id_token": f"header.{self._jwt_payload(token_payload)}.sig",
+                    "refresh_token": "refresh",
+                }
+            },
+            account_hint="same@example.com",
+        )
+        cli.AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        cli.AUTH_FILE.write_text((cli.PROFILES_DIR / "acc4" / "auth.json").read_text(encoding="utf-8"), encoding="utf-8")
+
+        def refresh_live_auth(**_kwargs):
+            cli.AUTH_FILE.write_text(
+                json.dumps(
+                    {
+                        "tokens": {
+                            "access_token": "fresh-access",
+                            "account_id": "acc-4",
+                            "id_token": f"header.{self._jwt_payload(token_payload)}.sig",
+                            "refresh_token": "fresh-refresh",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return True, "refreshed", {"email": "same@example.com"}
+
+        with mock.patch(
+            "codex_account_manager.cli.fetch_usage_from_auth",
+            side_effect=[
+                (None, None, None, None, "http 401"),
+                ((90, None), (80, None), "plus", True, None),
+            ],
+        ), mock.patch("codex_account_manager.cli.refresh_codex_auth_via_app_server", side_effect=refresh_live_auth):
+            payload = cli.collect_usage_local_data(timeout_sec=1)
+
+        self.assertIsNone(payload["profiles"][0]["error"])
+        saved = json.loads((cli.PROFILES_DIR / "acc4" / "auth.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["tokens"]["access_token"], "fresh-access")
+
+    def test_switch_refreshes_selected_profile_snapshot_after_copy(self):
+        token_payload = {"email": "switch@example.com", "sub": "sub-switch"}
+        self._write_profile_auth(
+            "acc4",
+            {
+                "tokens": {
+                    "access_token": "stale-access",
+                    "account_id": "acc-4",
+                    "id_token": f"header.{self._jwt_payload(token_payload)}.sig",
+                    "refresh_token": "refresh",
+                }
+            },
+            account_hint="switch@example.com",
+        )
+
+        def refresh_live_auth(**_kwargs):
+            cli.AUTH_FILE.write_text(
+                json.dumps(
+                    {
+                        "tokens": {
+                            "access_token": "fresh-access",
+                            "account_id": "acc-4",
+                            "id_token": f"header.{self._jwt_payload(token_payload)}.sig",
+                            "refresh_token": "fresh-refresh",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return True, "refreshed", {"email": "switch@example.com"}
+
+        with mock.patch("codex_account_manager.cli.refresh_codex_auth_via_app_server", side_effect=refresh_live_auth):
+            rc = cli.cmd_switch("acc4", restart_codex=False)
+
+        self.assertEqual(rc, 0)
+        saved = json.loads((cli.PROFILES_DIR / "acc4" / "auth.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["tokens"]["access_token"], "fresh-access")
+
     def test_usage_row_does_not_select_ambiguous_principal_without_unique_email(self):
         self._write_profile_auth(
             "acc4",
