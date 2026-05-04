@@ -8,6 +8,7 @@ const {
   buildStatusIconDataUrl,
   buildStatusTone,
   buildTrayMenuTemplate,
+  createTrayIcon,
   prepareTrayIcon,
   resolveTrayIconPath,
   statusBarEnabled,
@@ -336,25 +337,24 @@ test("buildStatusIconDataUrl emits svg data for usage tone", () => {
   assert.match(decoded, /#f97316/);
 });
 
-test("prepareTrayIcon resizes macOS tray image and marks it as a template image", () => {
+test("createTrayIcon uses an empty image on macOS so only status text is visible", () => {
   const calls = [];
-  const resized = {
-    setTemplateImage(value) {
-      calls.push(["setTemplateImage", value]);
-    },
-  };
-  const image = {
-    resize(options) {
-      calls.push(["resize", options]);
-      return resized;
+  const emptyIcon = { kind: "empty-tray-icon" };
+  const nativeImage = {
+    createEmpty() {
+      calls.push(["createEmpty"]);
+      return emptyIcon;
     },
   };
 
-  assert.equal(prepareTrayIcon(image, "darwin"), resized);
-  assert.deepEqual(calls, [
-    ["resize", { width: 18, height: 18 }],
-    ["setTemplateImage", true],
-  ]);
+  assert.equal(createTrayIcon({ nativeImage, platform: "darwin" }), emptyIcon);
+  assert.deepEqual(calls, [["createEmpty"]]);
+});
+
+test("prepareTrayIcon leaves macOS tray images unchanged", () => {
+  const image = { kind: "mac-title-only-placeholder" };
+
+  assert.equal(prepareTrayIcon(image, "darwin"), image);
 });
 
 test("prepareTrayIcon resizes the Windows tray image to a compact 16px icon", () => {
@@ -373,8 +373,8 @@ test("prepareTrayIcon resizes the Windows tray image to a compact 16px icon", ()
   ]);
 });
 
-test("resolveTrayIconPath prefers the dedicated tray asset on macOS and Windows", () => {
-  assert.match(resolveTrayIconPath("darwin"), /codex-account-manager-tray\.png$/);
+test("resolveTrayIconPath skips the macOS image and keeps platform icons elsewhere", () => {
+  assert.equal(resolveTrayIconPath("darwin"), null);
   assert.match(resolveTrayIconPath("win32"), /codex-account-manager-win\.ico$/);
   assert.match(resolveTrayIconPath("linux"), /codex-account-manager\.png$/);
 });

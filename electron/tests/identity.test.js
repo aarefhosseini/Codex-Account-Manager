@@ -53,7 +53,7 @@ test("Electron icon helper resolves project-owned assets", () => {
   }
   assert.match(dock, /electron[\\/]assets[\\/]codex-account-manager\.icns$/);
   assert.match(icns, /electron[\\/]assets[\\/]codex-account-manager\.icns$/);
-  assert.match(trayIcon, /electron[\\/]assets[\\/]codex-account-manager-tray\.png$/);
+  assert.match(trayIcon, /electron[\\/]assets[\\/]codex-account-manager-tray\.svg$/);
   assert.ok(fs.existsSync(source), "source SVG should exist");
   assert.ok(fs.existsSync(appIcon), "Electron app icon should exist");
   assert.ok(fs.existsSync(dock), "Electron Dock icon should exist");

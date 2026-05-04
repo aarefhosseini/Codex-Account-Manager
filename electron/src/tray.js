@@ -1,6 +1,6 @@
 "use strict";
 
-const { getIconPath, getTrayIconPath } = require("./icons");
+const { getIconPath } = require("./icons");
 const { usageBandForPercent, usageHexColorForBand } = require("./usage-thresholds");
 
 function toPercentLabel(value) {
@@ -150,11 +150,7 @@ function prepareTrayIcon(image, platform = process.platform) {
     return image;
   }
   if (platform === "darwin") {
-    const resized = typeof image.resize === "function" ? image.resize({ width: 18, height: 18 }) : image;
-    if (typeof resized.setTemplateImage === "function") {
-      resized.setTemplateImage(true);
-    }
-    return resized;
+    return image;
   }
   if (platform === "win32") {
     return typeof image.resize === "function" ? image.resize({ width: 16, height: 16 }) : image;
@@ -164,15 +160,26 @@ function prepareTrayIcon(image, platform = process.platform) {
 
 function resolveTrayIconPath(platform = process.platform) {
   if (platform === "darwin") {
-    return getTrayIconPath();
+    return null;
   }
   return getIconPath(platform);
 }
 
+function createTrayIcon({ nativeImage, platform = process.platform }) {
+  if (platform === "darwin") {
+    return nativeImage?.createEmpty ? nativeImage.createEmpty() : "";
+  }
+  const iconPath = resolveTrayIconPath(platform);
+  let rawIcon = nativeImage?.createFromPath ? nativeImage.createFromPath(iconPath) : iconPath;
+  if (!rawIcon || !rawIcon.getSize || rawIcon.getSize().width === 0) {
+    const fallbackPath = iconPath.replace(".svg", ".png");
+    rawIcon = nativeImage?.createFromPath ? nativeImage.createFromPath(fallbackPath) : fallbackPath;
+  }
+  return prepareTrayIcon(rawIcon, platform);
+}
+
 function createTray({ Tray, Menu, nativeImage, summary, actions }) {
-  const iconPath = resolveTrayIconPath(process.platform);
-  const rawIcon = nativeImage?.createFromPath ? nativeImage.createFromPath(iconPath) : iconPath;
-  const icon = prepareTrayIcon(rawIcon);
+  const icon = createTrayIcon({ nativeImage, platform: process.platform });
   const tray = new Tray(icon);
   applyTrayState({ tray, Menu, summary, actions, nativeImage });
   return tray;
@@ -184,6 +191,7 @@ module.exports = {
   buildStatusIconDataUrl,
   buildStatusTone,
   buildTrayMenuTemplate,
+  createTrayIcon,
   createTray,
   getIconPath,
   prepareTrayIcon,

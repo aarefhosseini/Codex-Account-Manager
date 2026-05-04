@@ -55,7 +55,7 @@ function getDockIconPath() {
 }
 
 function getTrayIconPath() {
-  return getElectronAssetPath("codex-account-manager-tray.png");
+  return getElectronAssetPath("codex-account-manager-tray.svg");
 }
 
 module.exports = {

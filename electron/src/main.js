@@ -1336,12 +1336,28 @@ function buildSplashHtml(iconUrl) {
   ].join("");
 }
 
+function buildSplashIconSrc() {
+  const iconPath = getIconPath();
+  try {
+    const iconBuffer = fs.readFileSync(iconPath);
+    const ext = path.extname(iconPath).toLowerCase();
+    const mimeType = ext === ".svg"
+      ? "image/svg+xml"
+      : ext === ".jpg" || ext === ".jpeg"
+        ? "image/jpeg"
+        : "image/png";
+    return `data:${mimeType};base64,${iconBuffer.toString("base64")}`;
+  } catch {
+    return pathToFileURL(iconPath).toString();
+  }
+}
+
 function createSplashWindow() {
   if (splashWindow && !splashWindow.isDestroyed()) {
     return splashWindow;
   }
   const iconPath = getWindowIconPath();
-  const iconUrl = pathToFileURL(getIconPath()).toString();
+  const iconUrl = buildSplashIconSrc();
   splashWindow = new BrowserWindow({
     width: 440,
     height: 320,

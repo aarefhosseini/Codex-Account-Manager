@@ -80,7 +80,6 @@ import { SettingCopy, SettingsCardShell, SettingsSubsection } from "./components
 import SectionCard from "./components/SectionCard.jsx";
 import StatusDot from "./components/StatusDot.jsx";
 import StepperInput from "./components/StepperInput.jsx";
-import { ToastProvider, useToast } from "./components/ToastProvider.jsx";
 import ToggleSwitch from "./components/ToggleSwitch.jsx";
 
 function NavIcon({ id }) {
@@ -2744,7 +2743,6 @@ function AppContent() {
   const desktop = window.codexAccountDesktop;
   const isWindowsDesktop = String(desktop?.platform || "").toLowerCase() === "win32";
   const isMacDesktop = String(desktop?.platform || "").toLowerCase() === "darwin";
-  const { showToast } = useToast();
   const [activeView, setActiveView] = useState("profiles");
   const [viewportSizeClass, setViewportSizeClass] = useState(() => classifyWidth(window.innerWidth));
   const [sidebarMode, setSidebarMode] = useState("fixed");
@@ -2844,7 +2842,10 @@ function AppContent() {
   }, [autoChain, state]);
 
   function notifySuccess(title, description = "") {
-    showToast({ tone: "success", title, description });
+    appendDesktopLog("info", String(title || "").trim(), {
+      description: String(description || "").trim(),
+      source: "renderer:notifySuccess",
+    });
   }
 
   function appendDesktopLog(level, message, details = {}) {
@@ -2885,11 +2886,6 @@ function AppContent() {
   function closeErrorBanner() {
     setError("");
   }
-
-  useEffect(() => {
-    if (!error) return;
-    showToast({ tone: "danger", title: "Action failed", description: error });
-  }, [error, showToast]);
 
   useEffect(() => {
     if (!error || !errorDismissAt) {
@@ -5641,11 +5637,7 @@ function AppContent() {
 }
 
 function App() {
-  return (
-    <ToastProvider>
-      <AppContent />
-    </ToastProvider>
-  );
+  return <AppContent />;
 }
 
 createRoot(document.getElementById("root")).render(<App />);
