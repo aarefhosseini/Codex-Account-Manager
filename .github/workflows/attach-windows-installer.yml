@@ -1,0 +1,50 @@
+name: Attach Windows installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Desktop release workflow run ID
+        required: true
+        type: string
+      release_tag:
+        description: Existing draft release tag
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: ${{ inputs.run_id }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - name: Verify the build and draft release
+        shell: bash
+        run: |
+          [[ "$BUILD_RUN" =~ ^[0-9]+$ && "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" | jq -e '.conclusion == "success" and .path == ".github/workflows/desktop-release.yml"'
+          gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft | grep -qx true
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-installer
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Attach installer and checksums
+        shell: bash
+        run: |
+          windows="Codex-Account-Manager-Windows-Stable-$RELEASE_TAG-x64.exe"
+          mac="Codex-Account-Manager-macOS-$RELEASE_TAG-arm64.dmg"
+          test -s "$windows"
+          mac_hash=$(gh api "repos/$GH_REPO/releases" --paginate | jq -r --arg tag "$RELEASE_TAG" --arg name "$mac" '.[] | select(.tag_name == $tag and .draft) | .assets[] | select(.name == $name and .state == "uploaded") | .digest | sub("^sha256:"; "")')
+          [[ "$mac_hash" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s  %s\n' "$mac_hash" "$mac" > SHA256SUMS.txt
+          sha256sum "$windows" >> SHA256SUMS.txt
+          gh release upload "$RELEASE_TAG" "$windows" SHA256SUMS.txt
