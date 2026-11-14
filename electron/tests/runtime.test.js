@@ -470,7 +470,7 @@ test("resolveRuntimeStatus accepts a legacy installed core when doctor is unsupp
   assert.ok(runtime.errors.some((row) => row.code === "LEGACY_CORE"));
 });
 
-test("installPythonCore refreshes the Homebrew pipx command and streams progress", async () => {
+test("installPythonCore refreshes the Homebrew pipx command and streams progress", { skip: process.platform !== "darwin" }, async () => {
   const progress = [];
   const spawned = [];
   const childFactories = [];

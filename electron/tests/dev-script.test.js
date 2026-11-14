@@ -62,7 +62,7 @@ test("getElectronLaunchSpec injects the repo core command for dev shells", () =>
   assert.equal(spec.options.env.CAM_ELECTRON_STARTUP_DEBUG, "1");
   assert.equal(spec.options.env.CAM_ELECTRON_APP_LAUNCH_CONTEXT, "dev-script");
   assert.equal(fsCalls[1][0], "writeFileSync");
-  assert.match(fsCalls[1][2], /bin\/codex-account/);
+  assert.ok(fsCalls[1][2].includes(JSON.stringify(path.resolve("/tmp/electron", "..", "bin", "codex-account"))));
 });
 
 test("getMacDevAppPaths targets a branded macOS runtime bundle", () => {
