@@ -56,9 +56,9 @@ test("switch row motion helper returns inverse transforms for moved rows only", 
   ]);
 });
 
-test("switch row motion timing is intentionally calm and readable", async () => {
+test("switch row motion finishes promptly", async () => {
   const { SWITCH_ROW_CLEANUP_BUFFER_MS, SWITCH_ROW_MOTION_MS } = await switchState;
-  assert.equal(SWITCH_ROW_MOTION_MS, 4000);
+  assert.ok(SWITCH_ROW_MOTION_MS > 0 && SWITCH_ROW_MOTION_MS <= 300);
   assert.ok(SWITCH_ROW_CLEANUP_BUFFER_MS >= 100);
 });
 

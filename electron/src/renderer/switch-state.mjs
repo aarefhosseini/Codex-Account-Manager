@@ -1,6 +1,6 @@
 import { usageProgressTone } from "./usage-thresholds.mjs";
 
-export const SWITCH_ROW_MOTION_MS = 4000;
+export const SWITCH_ROW_MOTION_MS = 240;
 export const SWITCH_ROW_CLEANUP_BUFFER_MS = 180;
 
 export function usageTone(value) {

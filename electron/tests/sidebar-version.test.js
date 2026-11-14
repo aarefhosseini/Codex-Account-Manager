@@ -12,7 +12,7 @@ test("sidebar about button includes a small right-aligned version label", () => 
   assert.match(source, /sidebar-dev-badge/);
   assert.match(source, /view\.id === "about"/);
   assert.doesNotMatch(source, /App version/);
-  assert.match(source, /SIDEBAR_APP_VERSION_FALLBACK = "v0\.0\.21"/);
+  assert.ok(source.includes(`SIDEBAR_APP_VERSION_FALLBACK = "v${require("../package.json").version}"`));
   assert.match(source, /desktopVersion/);
   assert.match(source, /updaterDevMode/);
   assert.doesNotMatch(source, /version=\{updateStatus\?\.current_version/);

@@ -3,6 +3,8 @@ import { clampPercent as clampPercentShared, usageCssColorVar } from "./usage-th
 
 const PROFILE_FIXED_COLUMN_WIDTHS = {
   cur: { compact: 18, default: 24 },
+  purchased: { compact: 90, default: 100 },
+  expires: { compact: 150, default: 170 },
   auto: { compact: 48, default: 48 },
   actions: { compact: 80, default: 116 },
 };
@@ -22,6 +24,8 @@ const PROFILE_RESIZE_BOUNDS = {
   paid: { min: 64, max: 220 },
   id: { min: 88, max: 320 },
   added: { min: 88, max: 320 },
+  purchased: { min: 100, max: 320 },
+  expires: { min: 140, max: 360 },
   note: { min: 96, max: 480 },
   auto: { min: 60, max: 120 },
 };
@@ -39,6 +43,8 @@ const PROFILE_FLEX_COLUMN_WEIGHTS = {
   paid: 0.55,
   id: 0.75,
   added: 0.7,
+  purchased: 0.8,
+  expires: 1.15,
   note: 0.85,
 };
 

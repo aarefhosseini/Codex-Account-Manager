@@ -22,8 +22,8 @@ export function ToastProvider({ children }) {
 
   const showToast = useCallback((input) => {
     const toast = normalizeToast(input);
-    setToasts((current) => [...current, toast]);
-    window.setTimeout(() => removeToast(toast.id), 3000);
+    setToasts((current) => [...current.filter((item) => item.title !== toast.title || item.description !== toast.description), toast].slice(-4));
+    if (toast.tone !== "error") window.setTimeout(() => removeToast(toast.id), 5000);
     return toast.id;
   }, [removeToast]);
 
@@ -37,6 +37,7 @@ export function ToastProvider({ children }) {
           <article key={toast.id} className={`toast ${toast.tone}`}>
             <strong className="toast-title">{toast.title}</strong>
             {toast.description ? <p className="toast-description">{toast.description}</p> : null}
+            <button type="button" className="toast-close" aria-label="Dismiss notification" onClick={() => removeToast(toast.id)}>×</button>
           </article>
         ))}
       </div>

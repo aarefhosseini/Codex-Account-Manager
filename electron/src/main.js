@@ -1560,7 +1560,11 @@ function notifySwitchIfEnabled(nextDesktopState, previousProfileName = "") {
   if (!notificationsEnabled(nextDesktopState?.config || {})) {
     return { ok: false, reason: "Notifications are disabled in desktop settings." };
   }
-  return sendUsageNotification(Notification, nextDesktopState?.usage, openProfilesFromNotification, getIconPath());
+  return sendUsageNotification(Notification, nextDesktopState?.usage, openProfilesFromNotification, getIconPath(), {
+    title: "Account switched",
+    subtitle: "",
+    body: `Active account: ${nextProfileName}`,
+  });
 }
 
 function openWebPanel() {
@@ -1733,7 +1737,7 @@ function createMockApiClient() {
     status: "synced",
     status_text: "Synced from GitHub",
     source: "github",
-    repo_url: "https://github.com/alisinaee/Codex-Account-Manager/releases",
+    repo_url: "https://github.com/aarefhosseini/Codex-Account-Manager/releases",
     releases: [
       {
         tag: "v0.0.20",

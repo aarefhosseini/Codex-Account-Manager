@@ -4,6 +4,15 @@ This file mirrors the user-visible release stream for GitHub readers. GitHub Rel
 
 ## Unreleased
 
+## 0.1.0
+
+- Check that Codex and its helpers exit before replacing account credentials. Back up and verify the active credentials, reopen Codex, and queue a continuation message when enabled.
+- Recognize macOS installations named ChatGPT.app using the Codex bundle identity.
+- Record the Plus purchase date and show the estimated end date and remaining days for a 30-day period.
+- Search and filter accounts, see the active account at a glance, and use a card layout in narrow windows. Improve keyboard navigation and dialog focus.
+- Prevent duplicate actions, keep failures visible, and show unavailable quota without treating it as zero.
+- Package the desktop app with the Python core for Apple Silicon and Windows x64.
+
 ## 0.0.20
 
 ### Desktop Release

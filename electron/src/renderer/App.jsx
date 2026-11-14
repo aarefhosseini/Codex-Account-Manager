@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { createRoot } from "react-dom/client";
 import iconUrl from "../../assets/codex-account-manager.svg";
 import "./styles.css";
+import "./ui-polish.css";
 import {
   AboutIcon,
   ArrowRightIcon,
@@ -20,8 +21,6 @@ import {
   UpdateIcon,
 } from "./icon-pack.jsx";
 import {
-  buildSwitchAnimationPreview,
-  buildRowsByNameOrder,
   buildSwitchRowMotionPlans,
   buildProfileRowClassName,
   createSwitchController,
@@ -68,7 +67,6 @@ import {
   waitForServiceRestart,
 } from "./parity.mjs";
 import { triggerBlobDownload } from "./download-utils.mjs";
-import { getErrorBannerCountdownSeconds } from "./error-banner.mjs";
 import { mergeUsagePayload } from "./usage-merge.mjs";
 import { getNextThemeMode, normalizeThemeMode, watchThemePreference } from "./theme.mjs";
 import Badge from "./components/Badge.jsx";
@@ -81,6 +79,10 @@ import SectionCard from "./components/SectionCard.jsx";
 import StatusDot from "./components/StatusDot.jsx";
 import StepperInput from "./components/StepperInput.jsx";
 import ToggleSwitch from "./components/ToggleSwitch.jsx";
+import ProfilesOverview from "./components/ProfilesOverview.jsx";
+import { filterProfiles, profileIsReady, profileNeedsAttention } from "./profile-filters.mjs";
+import { ToastProvider, useToast } from "./components/ToastProvider.jsx";
+import { formatSubscriptionDate, subscriptionSummary } from "./subscription.mjs";
 
 function NavIcon({ id }) {
   switch (id) {
@@ -143,47 +145,39 @@ function shortcutModifierLabel(isMacDesktop = false) {
 }
 
 const columnDefs = [
-  { key: "cur", label: "Status", required: false },
-  { key: "profile", label: "Profile", required: false },
+  { key: "cur", label: "Status", required: true },
+  { key: "profile", label: "Profile", required: true },
   { key: "email", label: "Email", required: false },
-  { key: "h5", label: "5h usage", required: false },
-  { key: "h5remain", label: "5h remain", required: true },
+  { key: "h5", label: "5h left", required: false },
+  { key: "h5remain", label: "5h resets in", required: true },
   { key: "h5reset", label: "5h reset at", required: false },
-  { key: "weekly", label: "Weekly", required: false },
-  { key: "weeklyremain", label: "W remain", required: true },
+  { key: "weekly", label: "Weekly left", required: false },
+  { key: "weeklyremain", label: "Weekly resets in", required: true },
   { key: "weeklyreset", label: "Weekly reset at", required: false },
   { key: "plan", label: "Plan", required: false },
   { key: "paid", label: "Paid", required: false },
   { key: "id", label: "Id", required: false },
   { key: "added", label: "Added", required: false },
+  { key: "purchased", label: "Purchased", required: false },
+  { key: "expires", label: "Plus period", required: false },
   { key: "note", label: "Note", required: false },
   { key: "auto", label: "Auto", required: false },
-  { key: "actions", label: "Actions", required: false },
+  { key: "actions", label: "Actions", required: true },
 ];
 
 const defaultColumns = {
-  cur: true,
-  profile: true,
-  email: true,
-  h5: true,
-  h5remain: true,
-  h5reset: true,
-  weekly: true,
-  weeklyremain: true,
-  weeklyreset: true,
-  plan: true,
-  paid: true,
-  id: true,
-  added: true,
-  note: true,
-  auto: true,
-  actions: true,
+  cur: true, profile: true, email: false,
+  h5: true, h5remain: true, h5reset: false,
+  weekly: true, weeklyremain: true, weeklyreset: false,
+  plan: false, paid: false, id: false, added: false,
+  purchased: false, expires: true, note: false, auto: false, actions: true,
 };
 
 function normalizeColumns(pref) {
   const next = { ...defaultColumns, ...(pref || {}) };
-  next.h5remain = true;
-  next.weeklyremain = true;
+  for (const column of columnDefs) {
+    if (column.required) next[column.key] = true;
+  }
   return next;
 }
 
@@ -236,23 +230,7 @@ function saveStoredColumnWidthOverrides(overrides) {
   } catch (_) {}
 }
 
-const WINDOWS_SWITCH_RESTART_DIALOG_PREF_KEY = "codex_windows_switch_restart_dialog_suppressed";
 const DEBUG_CAPTURE_PREF_KEY = "codex_debug_capture_enabled";
-const ERROR_BANNER_AUTO_DISMISS_MS = 30_000;
-
-function loadWindowsSwitchRestartDialogPreference() {
-  try {
-    return localStorage.getItem(WINDOWS_SWITCH_RESTART_DIALOG_PREF_KEY) === "1";
-  } catch (_) {
-    return false;
-  }
-}
-
-function saveWindowsSwitchRestartDialogPreference(suppressed) {
-  try {
-    localStorage.setItem(WINDOWS_SWITCH_RESTART_DIALOG_PREF_KEY, suppressed ? "1" : "0");
-  } catch (_) {}
-}
 
 function loadDebugCapturePreference() {
   try {
@@ -282,6 +260,7 @@ function usageValue(row, key) {
 }
 
 function usagePercentNumberFromUsage(usage) {
+  if (usage?.remaining_percent === null || usage?.remaining_percent === undefined || usage?.remaining_percent === "") return null;
   const n = Number(usage?.remaining_percent);
   if (!Number.isFinite(n)) return null;
   return Math.max(0, Math.min(100, Math.round(n)));
@@ -511,6 +490,22 @@ function sortRows(rows, sort) {
         return row.is_paid === true ? 1 : row.is_paid === false ? 0 : -1;
       case "id":
         return String(row.account_id || "").toLowerCase();
+      case "purchased":
+        return String(row.subscription?.purchased_at || "");
+      case "expires":
+        return String(row.subscription?.expires_at || "");
+      case "plan":
+        return String(row.plan_type || "");
+      case "h5remain":
+      case "h5reset":
+        return Number(row.usage_5h?.resets_at || 0);
+      case "weeklyremain":
+      case "weeklyreset":
+        return Number(row.usage_weekly?.resets_at || 0);
+      case "auto":
+        return row.auto_switch_eligible ? 1 : 0;
+      case "note":
+        return String(row.note || "");
       case "added":
         return String(row.saved_at || "").toLowerCase();
       default:
@@ -637,6 +632,8 @@ const tableColumnLayout = {
   paid: { colClassName: "col-paid", width: "4%" },
   id: { colClassName: "col-id", width: "6%" },
   added: { colClassName: "col-added", width: "5%" },
+  purchased: { colClassName: "col-purchased", width: "100px" },
+  expires: { colClassName: "col-expires", width: "170px" },
   note: { colClassName: "col-note", width: "4%" },
   auto: { colClassName: "col-auto", width: "48px" },
   actions: { colClassName: "col-actions", width: "116px" },
@@ -999,7 +996,7 @@ function SidebarUsageArc({ metric, value }) {
   );
 }
 
-const SIDEBAR_APP_VERSION_FALLBACK = "v0.0.21";
+const SIDEBAR_APP_VERSION_FALLBACK = "v0.1.0";
 
 function VersionDisplay({ version, updaterDevMode = false, className = "" }) {
   const appVersion = String(version || SIDEBAR_APP_VERSION_FALLBACK).trim() || SIDEBAR_APP_VERSION_FALLBACK;
@@ -1182,13 +1179,13 @@ function TopBar({ activeTitle, updateStatus, loading, themeMode, onCycleTheme, o
       </div>
       <div className="top-actions">
         <ConfirmAction
-          className="topbar-compact-btn"
-          label="Restart"
+          className="topbar-compact-btn service-restart-control"
+          label="Restart service"
           confirmLabel="Confirm restart ✓"
           onConfirm={onRestart}
           tone="danger"
         />
-        <Button variant="primary" className="topbar-compact-btn" loading={loading} onClick={onRefresh} disabled={loading}>
+        <Button variant="secondary" className="topbar-compact-btn" loading={loading} onClick={onRefresh} disabled={loading}>
           {loading ? "Refreshing" : "Refresh"}
         </Button>
         <Button
@@ -1230,6 +1227,7 @@ function AccountsTable({
   const lastMotionTokenRef = useRef("");
 
   useLayoutEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return undefined;
     const motion = switchMotion || {};
     const motionToken = String(motion.token || "");
     if (!motionToken || lastMotionTokenRef.current === motionToken || !tableRef.current) {
@@ -1327,7 +1325,7 @@ function AccountsTable({
       className: ["email", "id", "added", "note", "h5remain", "h5reset", "weeklyremain", "weeklyreset"].includes(column.key)
         ? `${column.key === "email" ? "email-cell" : ""} ${column.key === "id" ? "id-cell" : ""} ${column.key === "added" ? "added-cell" : ""} ${column.key === "note" ? "note-cell" : ""} ${column.key === "h5remain" || column.key === "h5reset" || column.key === "weeklyremain" || column.key === "weeklyreset" ? "reset-cell" : ""}`.trim()
         : "",
-      sortable: true,
+      sortable: !["cur", "actions"].includes(column.key),
       render: (profile) => {
         const quotaBlocked = (usageValue(profile, "usage_5h") ?? 1) <= 0 || (usageValue(profile, "usage_weekly") ?? 1) <= 0;
         const disableSwitch = profile.is_current || Boolean(switching);
@@ -1342,7 +1340,10 @@ function AccountsTable({
           case "cur":
             return <StatusDot active={profile.is_current} />;
           case "profile":
-            return <strong className="profile-name">{profile.name}</strong>;
+            return <div className="profile-identity">
+              <div><strong className="profile-name">{profile.name}</strong>{profile.is_current ? <span className="current-account-tag">Current</span> : null}</div>
+              {!visibleColumns.email ? <span className="profile-identity-email" title={profile.email_display}>{profile.email_display}</span> : null}
+            </div>;
           case "email":
             return <span className="muted" title={profile.email_display}>{profile.email_display}</span>;
             case "h5":
@@ -1390,7 +1391,7 @@ function AccountsTable({
           case "plan":
             return (
               <Badge variant={planBadgeVariant(profile.plan_type)} className="plan-badge">
-                {String(profile.plan_type || "free")}
+                {String(profile.plan_type || "unknown")}
               </Badge>
             );
           case "paid":
@@ -1401,6 +1402,16 @@ function AccountsTable({
             );
           case "id":
             return <span className="muted id-value" title={profile.account_id || "-"}>{truncateAccountId(profile.account_id)}</span>;
+          case "purchased":
+            return <span className="muted" title={profile.subscription?.purchased_at || "Purchase date not set"}>{formatSubscriptionDate(profile.subscription?.purchased_at)}</span>;
+          case "expires":
+            return <span className={`subscription-status subscription-period ${profile.subscription?.status || "unknown"}`} title={profile.subscription?.expires_at || "Set purchase date from account details"}>
+              {profile.subscription?.purchased_at ? <>
+                <span className="muted">Bought: {formatSubscriptionDate(profile.subscription.purchased_at)}</span>
+                <span>Ends: {formatSubscriptionDate(profile.subscription.expires_at)}</span>
+                <span>{profile.subscription.status === "expired" ? "Period ended" : `${profile.subscription.days_remaining} days left`}</span>
+              </> : "Purchase date not set"}
+            </span>;
           case "added":
             return <span className="muted" title={fmtSavedAtFull(profile.saved_at)}>{fmtSavedAt(profile.saved_at)}</span>;
           case "note":
@@ -1429,7 +1440,9 @@ function AccountsTable({
                       className={`actions-menu-btn actions-switch-btn ${disableSwitch ? "btn-disabled" : ""} ${isSwitchingProfile ? "switch-loading-btn" : ""}`}
                       loading={isSwitchingProfile}
                       disabled={disableSwitch}
-                      onClick={() => onSwitch(profile.name)}
+                      data-current-account={profile.is_current}
+                      disabledReason={profile.is_current ? "This account is already active" : "Wait for the current switch to finish"}
+                      onClick={(event) => onSwitch(profile.name, { animate: event.detail > 0 })}
                       aria-label={`Switch to ${profile.name}`}
                       title={isSwitchingProfile ? `Switching to ${profile.name}` : `Switch to ${profile.name}`}
                     >
@@ -1452,11 +1465,13 @@ function AccountsTable({
                       className={`${disableSwitch ? "btn-disabled" : ""} ${isSwitchingProfile ? "switch-loading-btn" : ""}`.trim()}
                       loading={isSwitchingProfile}
                       disabled={disableSwitch}
-                      onClick={() => onSwitch(profile.name)}
+                      data-current-account={profile.is_current}
+                      disabledReason={profile.is_current ? "This account is already active" : "Wait for the current switch to finish"}
+                      onClick={(event) => onSwitch(profile.name, { animate: event.detail > 0 })}
                       aria-label={isSwitchingProfile ? `Switching to ${profile.name}` : `Switch to ${profile.name}`}
                       title={isSwitchingProfile ? `Switching to ${profile.name}` : `Switch to ${profile.name}`}
                     >
-                      {isSwitchingProfile ? <span className="visually-hidden">Switching</span> : "Switch"}
+                      {isSwitchingProfile ? <span className="visually-hidden">Switching</span> : profile.is_current ? "Active" : "Switch"}
                     </Button>
                     <Button
                       className="actions-menu-btn"
@@ -1524,6 +1539,7 @@ function AccountsMobileList({ profiles, switching, onSwitch, onOpenRowActions, o
               onOpenAccountDetails(profile);
             }}
             onKeyDown={(event) => {
+              if (isInteractiveEventTarget(event.target)) return;
               if (event.key !== "Enter" && event.key !== " ") return;
               event.preventDefault();
               onOpenAccountDetails(profile);
@@ -1533,6 +1549,7 @@ function AccountsMobileList({ profiles, switching, onSwitch, onOpenRowActions, o
               <div className="mobile-left">
                 <StatusDot active={profile.is_current} />
                 <span className="mobile-profile">{profile.name || "-"}</span>
+                <span className="subscription-status" title={profile.subscription?.purchased_at || "Purchase date not set"}>{subscriptionSummary(profile.subscription)}</span>
               </div>
               <div className="mobile-actions">
                 <Button
@@ -1540,13 +1557,13 @@ function AccountsMobileList({ profiles, switching, onSwitch, onOpenRowActions, o
                   className={`${switchDisabled ? "btn-disabled" : ""} ${isSwitchingProfile ? "switch-loading-btn" : ""}`.trim()}
                   loading={isSwitchingProfile}
                   disabled={switchDisabled}
-                  onClick={() => onSwitch(profile.name)}
+                  onClick={(event) => onSwitch(profile.name, { animate: event.detail > 0 })}
                   aria-label={isSwitchingProfile ? `Switching to ${profile.name}` : `Switch to ${profile.name}`}
                   title={isSwitchingProfile ? `Switching to ${profile.name}` : `Switch to ${profile.name}`}
                 >
-                  {isSwitchingProfile ? <span className="visually-hidden">Switching</span> : "Switch"}
+                  {isSwitchingProfile ? <span className="visually-hidden">Switching</span> : profile.is_current ? "Active" : "Switch"}
                 </Button>
-                <Button className="actions-menu-btn" data-mobile-row-actions={profile.name} onClick={() => onOpenRowActions(profile)}>⋯</Button>
+                <Button className="actions-menu-btn" data-mobile-row-actions={profile.name} aria-label={`Row actions for ${profile.name}`} onClick={() => onOpenRowActions(profile)}>⋯</Button>
               </div>
             </div>
             <div className="mobile-email">{profile.email_display}</div>
@@ -1573,7 +1590,6 @@ function ProfilesView({
   switching,
   activatedProfile,
   switchMotion,
-  profileDeckOrder,
   onSwitch,
   onAddAccount,
   onImportProfiles,
@@ -1592,41 +1608,75 @@ function ProfilesView({
   compactMode,
   viewportSizeClass,
   shouldFlashUsageFn,
+  continueWork,
+  onContinueWorkChange,
 }) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all");
   const sortedProfiles = sortRows(buildProfileRows(state), sort);
-  const profiles = buildRowsByNameOrder(sortedProfiles, profileDeckOrder);
-  const visibleColumnCount = Object.values(visibleColumns || {}).filter(Boolean).length;
-  const wideMode = visibleColumnCount > 8;
-  const activeColumnCount = columnDefs.filter((column) => visibleColumns?.[column.key]).length;
-  const totalColumnCount = columnDefs.length;
+  const allProfiles = sortedProfiles;
+  const profiles = filterProfiles(allProfiles, query, filter);
+  const activeColumnCount = columnDefs.filter((column) => visibleColumns?.[column.key] && isColumnVisibleForViewport(column.key, viewportSizeClass)).length;
+  const wideMode = activeColumnCount > 8;
+  const manageRef = useRef(null);
+  useEffect(() => {
+    const closeOutside = (event) => {
+      const menu = manageRef.current;
+      if (menu?.open && !menu.contains(event.target)) menu.open = false;
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, []);
 
   return (
     <section className="view profiles-view" data-testid="profiles-view">
       <div className="profiles-view-shell">
+        <div className="profiles-heading">
+          <h1>Your accounts</h1>
+          <Button variant="primary" onClick={onAddAccount} disabled={!!switching}><span aria-hidden="true">＋</span> Add Account</Button>
+        </div>
+        <ProfilesOverview profiles={allProfiles} onOpenDetails={onOpenAccountDetails} />
         <div className="accounts-toolbar">
-          <div className="accounts-actions accounts-actions-left">
-            <Button onClick={onImportProfiles}>Import</Button>
-            <Button className="profiles-export-btn" onClick={onExportProfiles}>
-              <span className="btn-label">Export</span>
-            </Button>
+          <label className="profile-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4 4" /></svg>
+            <input type="search" aria-label="Search accounts" placeholder="Search name or email…" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setQuery(""); }} />
+          </label>
+          <div className="profile-filter-tabs" role="group" aria-label="Filter accounts">
+            {[["all", "All", allProfiles.length], ["ready", "Quota available", allProfiles.filter(profileIsReady).length], ["attention", "Needs attention", allProfiles.filter(profileNeedsAttention).length]].map(([key, label, count]) => (
+              <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}<span>{count}</span></button>
+            ))}
           </div>
           <div className="accounts-actions">
-            <Button variant="primary" onClick={onAddAccount}>Add Account</Button>
-            <ConfirmAction
-              label="Remove all"
-              confirmLabel="Confirm remove all ✓"
-              tone="danger"
-              onConfirm={onRemoveAll}
-            />
-            <Button className="columns-btn" onClick={onOpenColumns}>
-              <span className="btn-label">Columns</span>
-              <span className="columns-hidden-badge columns-count-badge" aria-label={`${activeColumnCount} of ${totalColumnCount} columns active`}>
-                {activeColumnCount}/{totalColumnCount}
-              </span>
-            </Button>
+            <Button className="columns-btn" onClick={onOpenColumns} aria-label={`Columns, ${activeColumnCount} visible`} title="Choose the information shown in the table"><span className="btn-label">Columns</span><span className="columns-hidden-badge columns-count-badge" aria-label={`${activeColumnCount} visible columns`}>{activeColumnCount}</span></Button>
+            <details className="account-management" ref={manageRef} onKeyDown={(event) => {
+              if (event.key !== "Escape" || !event.currentTarget.open) return;
+              event.currentTarget.open = false;
+              event.currentTarget.querySelector("summary")?.focus();
+            }}>
+              <summary>Manage <span aria-hidden="true">⌄</span></summary>
+              <div className="account-management-panel">
+                <Button onClick={(event) => { event.currentTarget.closest("details").open = false; onImportProfiles(); }}>Import accounts</Button>
+                <Button disabled={!allProfiles.length} onClick={(event) => { event.currentTarget.closest("details").open = false; onExportProfiles(); }}>Export accounts</Button>
+                {allProfiles.length ? <div className="management-danger"><Button variant="dangerOutline" onClick={(event) => {
+                  event.currentTarget.closest("details").open = false;
+                  onRemoveAll();
+                }}>Remove all accounts…</Button></div> : null}
+              </div>
+            </details>
           </div>
         </div>
-      <div className={`table-wrap profiles-table-wrap scrollable ${wideMode ? "wide-columns" : ""}`}>
+        <div className="profiles-list-caption">
+          <span aria-live="polite">{state ? `${profiles.length} of ${allProfiles.length} accounts` : "Loading accounts…"}</span>
+        </div>
+        <div className={`table-wrap profiles-table-wrap scrollable ${wideMode ? "wide-columns" : ""}`} aria-busy={!state}>
+          {!profiles.length ? (
+            <div className="accounts-empty-state">
+              <h2>{!state ? "Loading accounts…" : allProfiles.length ? "No matching accounts" : "No saved accounts"}</h2>
+              {state && (allProfiles.length ? (
+                <><p>Try another name or email, or clear the filter.</p><Button onClick={() => { setQuery(""); setFilter("all"); }}>Clear filters</Button></>
+              ) : <p>Add or import an account to see its quota and track your Plus period.</p>)}
+            </div>
+          ) : <>
           <AccountsTable
             profiles={profiles}
             switching={switching}
@@ -1654,6 +1704,11 @@ function ProfilesView({
             onOpenRowActions={onOpenRowActions}
             onOpenAccountDetails={onOpenAccountDetails}
           />
+          </>}
+        </div>
+        <div className="switch-preference">
+          <div><strong>Continue work after switching</strong><p>Reopen the previous chat and send a continuation message.</p></div>
+          <ToggleSwitch checked={continueWork} onChange={onContinueWorkChange} disabled={!!switching} ariaLabel="Continue unfinished work after switching" />
         </div>
       </div>
     </section>
@@ -2740,8 +2795,8 @@ function RuntimeSetupView({
 }
 
 function AppContent() {
+  const { showToast } = useToast();
   const desktop = window.codexAccountDesktop;
-  const isWindowsDesktop = String(desktop?.platform || "").toLowerCase() === "win32";
   const isMacDesktop = String(desktop?.platform || "").toLowerCase() === "darwin";
   const [activeView, setActiveView] = useState("profiles");
   const [viewportSizeClass, setViewportSizeClass] = useState(() => classifyWidth(window.innerWidth));
@@ -2760,16 +2815,16 @@ function AppContent() {
   const [debugCaptureEnabled, setDebugCaptureEnabled] = useState(loadDebugCapturePreference());
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState("");
+  const [continueWork, setContinueWork] = useState(() => {
+    try { return localStorage.getItem("codex_continue_unfinished_work") !== "false"; } catch (_) { return true; }
+  });
   const [activatedProfile, setActivatedProfile] = useState("");
   const [switchMotion, setSwitchMotion] = useState(null);
-  const [profileDeckOrder, setProfileDeckOrder] = useState([]);
   const [autoArrangeBusy, setAutoArrangeBusy] = useState(false);
   const [error, setErrorState] = useState("");
-  const [errorDismissAt, setErrorDismissAt] = useState(0);
   const [columnPrefs, setColumnPrefs] = useState(loadStoredColumns());
   const [columnWidthResizeEnabled, setColumnWidthResizeEnabled] = useState(loadStoredColumnWidthResizeEnabled());
   const [columnWidthOverrides, setColumnWidthOverrides] = useState(loadStoredColumnWidthOverrides());
-  const [windowsSwitchRestartDialogSuppressed, setWindowsSwitchRestartDialogSuppressed] = useState(loadWindowsSwitchRestartDialogPreference());
   const [sort, setSort] = useState({ key: "profile", dir: "asc" });
   const [modal, setModal] = useState(null);
   const [runtimeStatus, setRuntimeStatus] = useState({ phase: "checking_runtime", python: {}, core: {}, uiService: {}, errors: [] });
@@ -2809,10 +2864,6 @@ function AppContent() {
     () => normalizeProfileColumnWidthOverrides(columnWidthOverrides),
     [columnWidthOverrides],
   );
-  const errorCountdownSeconds = useMemo(
-    () => (error ? getErrorBannerCountdownSeconds(errorDismissAt, clockTick) : 0),
-    [clockTick, error, errorDismissAt],
-  );
   const compactMode = viewportSizeClass === "size-compact";
   const effectiveSidebarMode = compactMode ? "minimal" : sidebarMode;
   const chainMetricsByName = useMemo(() => {
@@ -2842,6 +2893,7 @@ function AppContent() {
   }, [autoChain, state]);
 
   function notifySuccess(title, description = "") {
+    showToast({ title, description });
     appendDesktopLog("info", String(title || "").trim(), {
       description: String(description || "").trim(),
       source: "renderer:notifySuccess",
@@ -2878,7 +2930,6 @@ function AppContent() {
       if (message && message !== String(current || "").trim()) {
         appendDesktopLog("error", message, { source: "renderer:setError" });
       }
-      setErrorDismissAt(message ? Date.now() + ERROR_BANNER_AUTO_DISMISS_MS : 0);
       return next;
     });
   }
@@ -2886,16 +2937,6 @@ function AppContent() {
   function closeErrorBanner() {
     setError("");
   }
-
-  useEffect(() => {
-    if (!error || !errorDismissAt) {
-      return;
-    }
-    if (clockTick < errorDismissAt) {
-      return;
-    }
-    setError("");
-  }, [clockTick, error, errorDismissAt]);
 
   function openConfirmDialog({ title, body, confirmLabel = "Confirm", tone = "danger", onConfirm }) {
     setModal({
@@ -3022,37 +3063,6 @@ function AppContent() {
     });
   }
 
-  function maybeShowWindowsSwitchRestartDialog() {
-    if (!isWindowsDesktop || windowsSwitchRestartDialogSuppressed) {
-      return;
-    }
-    setModal({ type: "switch-restart-warning", dontShowAgain: false });
-  }
-
-  function shouldPromptManualMacRestartAfterSwitch(profileName) {
-    if (!isMacDesktop) {
-      return false;
-    }
-    const target = String(profileName || "").trim();
-    if (!target) {
-      return false;
-    }
-    const rows = Array.isArray(stateRef.current?.usage?.profiles) ? stateRef.current.usage.profiles : [];
-    const row = rows.find((item) => String(item?.name || "").trim() === target);
-    if (!row) {
-      return false;
-    }
-    return isAuthExpiredLabel(usageErrorLabel(row.error));
-  }
-
-  function closeWindowsSwitchRestartDialog(dontShowAgain) {
-    if (dontShowAgain) {
-      setWindowsSwitchRestartDialogSuppressed(true);
-      saveWindowsSwitchRestartDialogPreference(true);
-    }
-    setModal((current) => (current?.type === "switch-restart-warning" ? null : current));
-  }
-
   function commitUsagePayload(payload, opts = {}) {
     if (!payload || payload.__error) return false;
     const merged = mergeUsagePayload(
@@ -3169,9 +3179,9 @@ function AppContent() {
     const showLoading = !!runOpts.showLoading;
     const clearUsageCache = !!runOpts.clearUsageCache;
     const forceReleaseNotes = !!runOpts.forceReleaseNotes;
+    if (refreshRunningRef.current) return;
     refreshRunningRef.current = true;
-    setLoading(true);
-    setError("");
+    if (showLoading || !stateRef.current) setLoading(true);
     try {
       if (clearUsageCache) {
         sessionUsageCacheRef.current = null;
@@ -3207,17 +3217,19 @@ function AppContent() {
         desktop.getState(),
         desktop.getBackendState(),
       ]);
-      const [update, logs, chain] = await Promise.all([
+      applyDesktopState(core, { backend });
+      const extras = await Promise.allSettled([
         desktop.getUpdateStatus({ force: forceReleaseNotes }),
         request(appendSessionToken("/api/debug/logs?tail=240", backend?.token), {}),
         request("/api/auto-switch/chain", {}),
       ]);
-      applyDesktopState(core, { backend, chain });
+      const [update, logs, chain] = extras.map((result) => result.status === "fulfilled" ? result.value : null);
+      if (chain) setAutoChain(normalizeChainPayload(chain));
       if (core?.usage && !core.usage.__error) {
         sessionUsageCacheRef.current = core.usage;
       }
-      applyUpdateStatusPayload(update);
-      setBackendDebugLogs(Array.isArray(logs?.logs) ? logs.logs : Array.isArray(logs) ? logs : []);
+      if (update) applyUpdateStatusPayload(update);
+      if (logs) setBackendDebugLogs(Array.isArray(logs?.logs) ? logs.logs : Array.isArray(logs) ? logs : []);
     } catch (err) {
       reportAppError(err, { action: "loadAll" });
       if (sessionUsageCacheRef.current) {
@@ -3462,45 +3474,27 @@ function AppContent() {
     return run;
   }
 
-  async function switchProfile(name) {
+  async function switchProfile(name, { animate = true } = {}) {
     const target = String(name || "").trim();
-    if (!target || switching) return;
-    const baseProfiles = sortRows(buildProfileRows(stateRef.current || state), sort);
-    const displayedProfiles = buildRowsByNameOrder(baseProfiles, profileDeckOrder);
-    const displayedNames = displayedProfiles.map((profile) => profile.name);
-    const { affectedNames, nextRows: nextProfiles } = buildSwitchAnimationPreview(displayedProfiles, target);
-    const fromRects = captureProfileTableRowRects();
-    const promptManualMacRestart = shouldPromptManualMacRestartAfterSwitch(target);
+    if (!target || switching || stateRef.current?.autoSwitch?.switch_in_flight || switchControllerRef.current?.getPendingName()) return;
     if (!switchControllerRef.current) {
       switchControllerRef.current = createSwitchController((profileName, options = {}) => desktop.switchProfile(profileName, options));
     }
     setSwitching(target);
     setActivatedProfile("");
     setError("");
-    setProfileDeckOrder(nextProfiles.map((profile) => profile.name));
-    setSwitchMotion({
-      token: `${Date.now()}-${target}`,
-      target,
-      affectedNames,
-      fromRects,
-    });
     try {
-      const switchOptions = buildDesktopSwitchOptions({ platform: desktop?.platform });
+      const switchOptions = { ...buildDesktopSwitchOptions({ platform: desktop?.platform }), continueWork };
       const next = await switchControllerRef.current.switchProfile(target, switchOptions);
+      const fromRects = animate ? captureProfileTableRowRects() : null;
       applyDesktopState(next);
+      if (fromRects) setSwitchMotion({ token: `${Date.now()}-${target}`, target, fromRects });
       loadAll({ showLoading: false, clearUsageCache: true }).catch(() => {});
       setActivatedProfile(target);
-      notifySuccess("Profile switched", `Current profile: ${target}`);
-      maybeShowWindowsSwitchRestartDialog();
-      if (promptManualMacRestart && switchOptions.noRestart === true) {
-        setModal({
-          type: "mac-auth-expired-restart-warning",
-          profileName: target,
-        });
-      }
+      notifySuccess("Account switched", `Codex reopened with ${target}.${continueWork ? " Continuation message queued in the previous chat." : ""}`);
+
       setTimeout(() => setActivatedProfile((current) => (current === target ? "" : current)), 1100);
     } catch (err) {
-      setProfileDeckOrder(displayedNames);
       loadAll().catch(() => {});
       setError(err?.message || String(err));
     } finally {
@@ -3511,8 +3505,9 @@ function AppContent() {
   async function testNotification() {
     setError("");
     try {
-      await desktop.testNotification();
-      notifySuccess("Notification sent", "A test desktop notification was triggered.");
+      const result = await desktop.testNotification();
+      if (result?.ok === false) throw new Error(result.reason || "Desktop notifications are unavailable. Check notification permissions in system settings.");
+      notifySuccess("Notification requested", "Check your desktop notification area.");
     } catch (err) {
       setError(err?.message || String(err));
     }
@@ -3541,7 +3536,7 @@ function AppContent() {
           throw err;
         }
       }
-      setError("Restarting UI service...");
+
       await waitForServiceRestart({
         previousVersion: previousHealthVersion,
         reloadAfterMs,
@@ -3742,10 +3737,12 @@ function AppContent() {
     if (!profile?.name) return;
     setModal({
       type: "row-actions",
+      returnFocus: document.activeElement,
       profile: {
         name: profile.name,
         email: profile.email_display || profile.email || "",
         accountId: profile.account_id || "",
+        subscription: profile.subscription,
         error: profile.error || "",
       },
     });
@@ -4622,15 +4619,21 @@ function AppContent() {
         {activeView === "profiles" && (
           <ProfilesView
             state={state}
-            switching={switching}
+            switching={switching || (state?.autoSwitch?.switch_in_flight ? state.autoSwitch.switch_target : "")}
             activatedProfile={activatedProfile}
             switchMotion={switchMotion}
-            profileDeckOrder={profileDeckOrder}
             onSwitch={switchProfile}
+            continueWork={continueWork}
+            onContinueWorkChange={(value) => { setContinueWork(value); try { localStorage.setItem("codex_continue_unfinished_work", String(value)); } catch (_) {} }}
             onAddAccount={openAddAccount}
             onImportProfiles={openImportProfiles}
             onExportProfiles={openExportProfiles}
-            onRemoveAll={handleRemoveAll}
+            onRemoveAll={() => openConfirmDialog({
+              title: "Remove all saved accounts?",
+              body: "This removes every saved account from Account Manager. You will need to add or import them again.",
+              confirmLabel: "Remove all accounts",
+              onConfirm: handleRemoveAll,
+            })}
             onOpenColumns={openColumnsModal}
             onOpenRowActions={openRowActions}
             onOpenAccountDetails={openAccountDetails}
@@ -4644,7 +4647,6 @@ function AppContent() {
             shouldFlashUsageFn={(name, metric, loadingState) => shouldFlashUsage(usageFlashUntilRef.current, name, metric, loadingState)}
             onColumnResize={handleColumnResize}
             onSort={(key) => {
-              setProfileDeckOrder([]);
               setSort((current) => ({ key, dir: current.key === key && current.dir === "asc" ? "desc" : "asc" }));
             }}
           />
@@ -4704,7 +4706,7 @@ function AppContent() {
             <div className="workspace-error-content">
               <p className="workspace-error-message">{error}</p>
               <div className="workspace-error-actions">
-                <span className="workspace-error-timer">Dismiss in {errorCountdownSeconds}s</span>
+                <span className="workspace-error-timer">Action needs attention</span>
                 <button
                   type="button"
                   className="dialog-close workspace-error-close"
@@ -4754,43 +4756,6 @@ function AppContent() {
             runUpdate().catch(() => {});
           }}
         />
-      )}
-
-      {modal?.type === "switch-restart-warning" && (
-        <Dialog
-          title="Restart Codex to apply Windows changes"
-          size="sm"
-          onClose={() => closeWindowsSwitchRestartDialog(!!modal.dontShowAgain)}
-          footer={<Button variant="primary" onClick={() => closeWindowsSwitchRestartDialog(!!modal.dontShowAgain)}>OK</Button>}
-        >
-          <p>On Windows, close and reopen the Codex app after switching accounts so all changes apply correctly.</p>
-          <label className="modal-check">
-            <input
-              type="checkbox"
-              checked={!!modal.dontShowAgain}
-              onChange={(event) => setModal((current) => (
-                current?.type === "switch-restart-warning"
-                  ? { ...current, dontShowAgain: event.target.checked }
-                  : current
-              ))}
-            />
-            <span>Do not show this again</span>
-          </label>
-        </Dialog>
-      )}
-
-      {modal?.type === "mac-auth-expired-restart-warning" && (
-        <Dialog
-          title="Manual restart recommended on macOS"
-          size="sm"
-          onClose={() => setModal(null)}
-          footer={<Button variant="primary" onClick={() => setModal(null)}>OK</Button>}
-        >
-          <p>
-            This profile appears to have expired auth. After switching, close and reopen the Codex app manually so host connections reset cleanly.
-          </p>
-          {modal.profileName ? <p className="muted">Switched profile: {modal.profileName}</p> : null}
-        </Dialog>
       )}
 
       {modal?.type === "auto-switch-stopped-warning" && (
@@ -4883,8 +4848,8 @@ function AppContent() {
       )}
 
       {modal?.type === "row-actions" && (
-        <Dialog title="Row actions" size="sm" onClose={() => setModal(null)} footer={<Button onClick={() => setModal(null)}>Done</Button>}>
-          <LabelValueRow label="Profile" value={modal.profile?.name || "-"} />
+        <Dialog title={`Manage ${modal.profile?.name || "account"}`} size="sm" onClose={() => setModal(null)} footer={<Button onClick={() => setModal(null)}>Done</Button>}>
+          <p className="muted" title={modal.profile?.email}>{modal.profile?.email || "Email unavailable"}</p>
           {isAuthExpiredLabel(usageErrorLabel(modal.profile?.error)) ? (
             <div className="workspace-error-inline" role="alert">
               <AuthExpiredBadge />
@@ -4899,7 +4864,7 @@ function AppContent() {
               busy: false,
             })}
             >
-              Edit
+              Rename account
             </Button>
             <Button
               variant="warning"
@@ -4909,9 +4874,51 @@ function AppContent() {
             >
               Re-login profile
             </Button>
-            <Button onClick={() => copyToClipboard("Email", modal.profile?.email)}>Copy email</Button>
-            <Button onClick={() => copyToClipboard("ID", modal.profile?.accountId)}>Copy ID</Button>
+            <Button onClick={() => setModal({ type: "subscription", profile: modal.profile, returnFocus: modal.returnFocus, purchasedAt: modal.profile?.subscription?.purchased_at || "", busy: false })}>Purchase date / Plus period</Button>
+            <Button disabled={!modal.profile?.email || modal.profile.email === "-"} onClick={() => copyToClipboard("Email", modal.profile?.email)}>Copy email</Button>
+            <Button disabled={!modal.profile?.accountId || modal.profile.accountId === "-"} onClick={() => copyToClipboard("ID", modal.profile?.accountId)}>Copy ID</Button>
             <Button variant="danger" onClick={() => { setModal(null); handleRemove(modal.profile?.name); }}>Remove account</Button>
+          </div>
+        </Dialog>
+      )}
+
+      {switching ? (
+        <div className="switch-status" role="status" aria-live="polite">
+          <strong>Switching to {switching}…</strong>
+          <span>Closing Codex → verifying exit → changing account → reopening previous chat{continueWork ? " → queuing continuation" : ""}</span>
+        </div>
+      ) : null}
+
+      {modal?.type === "subscription" && (
+        <Dialog title={`Purchase date — ${modal.profile?.name}`} size="sm" busy={modal.busy} initialFocus="#purchase-date" returnFocus={modal.returnFocus}
+          onClose={() => { if (!modal.busy) setModal(null); }}
+          footer={<>
+            <Button disabled={modal.busy} onClick={() => setModal(null)}>Cancel</Button>
+            <Button variant="primary" loading={modal.busy} onClick={async () => {
+              const name = modal.profile.name;
+              setModal((current) => ({ ...current, busy: true }));
+              try {
+                const result = await request("/api/local/subscription", { method: "POST", body: JSON.stringify({ name, purchased_at: modal.purchasedAt || null }) });
+                setState((current) => {
+                  const patchRows = (source) => source ? { ...source, profiles: source.profiles?.map((row) => row.name === name ? { ...row, subscription: result.subscription } : row) } : source;
+                  const next = { ...current, list: patchRows(current?.list), usage: patchRows(current?.usage) };
+                  stateRef.current = next;
+                  return next;
+                });
+                setModal(null);
+                notifySuccess("Purchase date saved", "Plus period is calculated as 30 days from purchase.");
+              } catch (error) {
+                setModal((current) => ({ ...current, busy: false, error: error.message }));
+              }
+            }}>Save</Button>
+          </>}>
+          <div className="modal-form">
+            <label htmlFor="purchase-date">Purchase date</label>
+            <input id="purchase-date" type="date" value={modal.purchasedAt} disabled={modal.busy} aria-invalid={!!modal.error} aria-describedby="purchase-date-help"
+              onChange={(event) => setModal((current) => ({ ...current, purchasedAt: event.target.value, error: "" }))} />
+            <p id="purchase-date-help">Enter the date on your receipt. Leave it empty if unknown.</p>
+            <p className="muted">Estimated end: 30 days after purchase. This is your local record, not a billing confirmation from OpenAI.</p>
+            {modal.error ? <p role="alert">{modal.error}</p> : null}
           </div>
         </Dialog>
       )}
@@ -4920,6 +4927,7 @@ function AppContent() {
         <Dialog
           title={`Rename profile - ${modal.name || "profile"}`}
           size="sm"
+          busy={modal.busy}
           onClose={() => setModal(null)}
           footer={(
             <>
@@ -5014,6 +5022,7 @@ function AppContent() {
             onClose={() => setModal(null)}
             footer={(
               <>
+                <Button onClick={() => setModal({ type: "subscription", profile, purchasedAt: profile.subscription?.purchased_at || "", busy: false })}>Edit purchase date</Button>
                 <Button onClick={() => copyToClipboard("Account JSON", rawJson)}>Copy JSON</Button>
                 <Button variant="primary" onClick={() => setModal(null)}>Done</Button>
               </>
@@ -5058,8 +5067,8 @@ function AppContent() {
                     <span className="account-details-state">{profile.is_current ? "Current profile" : "Saved profile"}</span>
                   </div>
                   <div className="account-details-meta-row">
-                    <Badge variant={planBadgeVariant(profile.plan_type)}>{String(profile.plan_type || "free")}</Badge>
-                    <Badge variant={profile.is_paid ? "success" : "neutral"}>{profile.is_paid ? "Paid account" : "Free account"}</Badge>
+                    <Badge variant={planBadgeVariant(profile.plan_type)}>{String(profile.plan_type || "unknown")}</Badge>
+                    <Badge variant={profile.is_paid ? "success" : "neutral"}>{profile.is_paid === true ? "Paid account" : profile.is_paid === false ? "Free account" : "Plan unknown"}</Badge>
                   </div>
                   <div className="account-details-email">{profile.email_display || profile.email || "-"}</div>
                 </div>
@@ -5082,6 +5091,9 @@ function AppContent() {
                   <LabelValueRow label="Email" value={formatAccountDetailValue(profile.email_display || profile.email)} />
                   <LabelValueRow label="Account ID" value={formatAccountDetailValue(profile.account_id)} />
                   <LabelValueRow label="Added" value={formatAccountDetailValue(fmtSavedAtFull(profile.saved_at))} />
+                  <LabelValueRow label="Purchased" value={formatSubscriptionDate(profile.subscription?.purchased_at)} />
+                  <LabelValueRow label="Estimated Plus end (30 days)" value={formatSubscriptionDate(profile.subscription?.expires_at)} />
+                  <LabelValueRow label="Time left" value={subscriptionSummary(profile.subscription)} />
                   <LabelValueRow label="Note" value={formatAccountDetailValue(profile.note)} />
                 </section>
 
@@ -5100,7 +5112,7 @@ function AppContent() {
                   <LabelValueRow label="Current profile" value={formatAccountDetailValue(profile.is_current)} />
                   <LabelValueRow label="Auto-switch eligible" value={formatAccountDetailValue(profile.auto_switch_eligible)} />
                   <LabelValueRow label="Same principal" value={formatAccountDetailValue(profile.same_principal)} />
-                  <LabelValueRow label="Plan type" value={formatAccountDetailValue(profile.plan_type || "free")} />
+                  <LabelValueRow label="Plan type" value={formatAccountDetailValue(profile.plan_type || "unknown")} />
                   <LabelValueRow label="Paid account" value={formatAccountDetailValue(profile.is_paid)} />
                   <LabelValueRow label="Last error" value={hasAuthExpired ? <AuthExpiredBadge /> : formatAccountDetailValue(profile.error)} />
                 </section>
@@ -5637,7 +5649,7 @@ function AppContent() {
 }
 
 function App() {
-  return <AppContent />;
+  return <ToastProvider><AppContent /></ToastProvider>;
 }
 
 createRoot(document.getElementById("root")).render(<App />);

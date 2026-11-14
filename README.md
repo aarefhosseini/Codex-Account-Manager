@@ -1,210 +1,88 @@
-<p align="center">
-  <img src="docs/assets/codex_account_manager.svg" alt="Codex Account Manager" width="120" />
-</p>
-
 # Codex Account Manager
 
-Desktop GUI for managing Codex accounts with local-first profile switching, usage tracking, native notifications, tray or menu-bar controls, and packaged app updates on macOS, Windows, and Linux.
+Codex Account Manager is a desktop app for people who use more than one Codex account. Save named profiles on your computer, compare their remaining quota, and switch accounts without repeating the sign-in flow. The same local Python core powers the desktop app, command-line tools, and browser panel.
 
-Current release: `v0.0.21`
+[Download a release](https://github.com/aarefhosseini/Codex-Account-Manager/releases) · [Changelog](CHANGELOG.md) · [Troubleshooting](docs/troubleshooting.md)
 
-[![Latest Release](https://img.shields.io/github/v/release/alisinaee/Codex-Account-Manager?label=release)](https://github.com/alisinaee/Codex-Account-Manager/releases)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://github.com/alisinaee/Codex-Account-Manager/blob/main/pyproject.toml)
-[![MIT License](https://img.shields.io/github/license/alisinaee/Codex-Account-Manager)](LICENSE)
-[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-2ea44f)](README.md#install-and-update)
-[![Windows CI](https://img.shields.io/github/actions/workflow/status/alisinaee/Codex-Account-Manager/windows-ci.yml?label=windows%20ci)](https://github.com/alisinaee/Codex-Account-Manager/actions/workflows/windows-ci.yml)
+![Profiles in Codex Account Manager, showing sample accounts, remaining quota, and purchase dates](docs/assets/screenshots/profiles-v0.1.0.png)
 
-Codex Account Manager keeps account switching, quota monitoring, automation rules, and desktop status signals in one local workflow instead of scattered auth-file edits and manual limit checking. The packaged desktop app connects to the same local Python core used by the CLI and local web panel, so advanced users can still automate or script without giving up the GUI.
+## Install
 
-Helpful links:
+The release builds for v0.1.0 target Apple Silicon Macs and 64-bit Windows PCs. The packaged app includes its Python core. Install Codex Desktop separately for desktop switching, and make the Codex CLI available for account login and other CLI operations. Linux users can build from source or use the CLI and local browser panel.
 
-- [GitHub Releases](https://github.com/alisinaee/Codex-Account-Manager/releases)
-- [CLI Reference](docs/cli-reference.md)
-- [UI API](docs/ui-api.md)
-- [Troubleshooting](docs/troubleshooting.md)
-
-## Install and Update
-
-Recommended path: use the packaged desktop app from [GitHub Releases](https://github.com/alisinaee/Codex-Account-Manager/releases).
-
-Direct package download links for the current release (`v0.0.21`):
-
-| Platform | Preferred package | Latest package link |
+| Platform | Package | Installation |
 | --- | --- | --- |
-| macOS | `.dmg` | [Download Codex.Account.Manager-0.0.21-arm64.dmg](https://github.com/alisinaee/Codex-Account-Manager/releases/download/v0.0.21/Codex.Account.Manager-0.0.21-arm64.dmg) |
-| Windows | `.exe` installer | Not published for `v0.0.21` yet |
-| Linux | `.AppImage` | [Download Codex.Account.Manager-0.0.21-arm64.AppImage](https://github.com/alisinaee/Codex-Account-Manager/releases/download/v0.0.21/Codex.Account.Manager-0.0.21-arm64.AppImage) |
+| macOS (Apple Silicon) | `.dmg` | Open the disk image and drag the app to Applications. Quit Account Manager before replacing an older copy. |
+| Windows (x64) | `.exe` | Run the installer and launch Codex Account Manager from the Start menu. |
+| Linux | Source | Follow the development instructions below. |
 
-Requirements:
+Select the package for your computer on the [v0.1.0 release page](https://github.com/aarefhosseini/Codex-Account-Manager/releases/tag/v0.1.0). The release notes list the available files and their SHA-256 checksums. These community builds use ad hoc signing on macOS and are unsigned on Windows.
 
-- Python `3.11+`
-- Codex CLI installed and available as `codex` in your `PATH`
+## Save and manage accounts
 
-Packaged app behavior:
+1. Open **Profiles** and click **Add Account**. Import your active Codex login or use the isolated sign-in flow for another account.
+2. Give the profile a name you will recognize. The table shows which account is active and how much of each quota window remains.
+3. Search by profile name, email, or account ID. Filter accounts with quota available or accounts that need attention.
+4. Open a row to see login status, reset times, and subscription details. The row menu lets you rename, re-login, copy details, or remove the saved account.
+5. Use **Manage** to import and export selected profiles as `.camzip` archives. Use **Columns** to add optional details or adjust widths. Narrow windows show account cards.
 
-- The Electron `Update` screen checks current release status.
-- The app selects OS-appropriate release assets when they are available.
-- Desktop updates may download or open the installer, then finish after relaunch.
-- Python core sync is handled separately when the bundled desktop shell needs the latest backend package state.
-- The app can guide local setup, but it does not auto-install Python itself.
+## Switch accounts and continue a chat
 
-CLI or developer fallback:
+Click **Switch** on the target profile. Account Manager finds the installed Codex Desktop app, requests shutdown, and checks that the app and its helpers have exited. It saves a private backup, replaces and verifies the active credentials, then reopens Codex. If shutdown fails, the app reports the cause before changing the account. If relaunch fails after the account changes, it tells you which step failed.
 
-```bash
-pipx install "git+https://github.com/alisinaee/Codex-Account-Manager.git"
+With **Continue work after switching** enabled, Account Manager opens the last identifiable local chat and queues a single instruction to continue unfinished work using `codex queue --resume`. This needs a compatible Codex CLI and local daemon. The app checks its bundled Codex CLI first, then the CLI on your PATH. The previous chat must remain accessible under the selected account. A queued command confirms delivery to Codex. The agent still needs available quota and any approvals required by that chat.
+
+Turn off the continuation toggle to switch without sending a message. A delivery timeout can leave the result unknown. Check the chat before submitting another instruction. For a custom Codex Desktop installation, see [configuration and storage](docs/config-and-storage.md).
+
+## Quota and subscription tracking
+
+The dashboard shows remaining quota in the five-hour and weekly windows and the time until each resets. Refresh the active profile or all saved accounts from the app. Settings lets you choose separate automatic refresh intervals. A missing quota value appears as unavailable.
+
+To track Plus, open the row menu and choose **Purchase date / Plus period**. Enter the purchase date on your receipt. The table displays the date, the estimated end 30 calendar days later, and the remaining days. Dates appear in the Persian calendar. You can edit the date after renewing or clear the field if it is unknown. Account Manager calculates this estimate locally from the date you enter. Check your billing page for the actual subscription status.
+
+**Auto Switch** lets you choose which profiles are eligible, set quota thresholds and a delay, and order a switch chain manually or by ranking. You can cancel a pending switch, run a one-time switch, or use the built-in test controls. Native notifications can report pending switches and show quota status. macOS has menu-bar controls, while Windows and Linux use a tray. Windows also offers a taskbar quota overlay and a mini meter.
+
+The desktop app includes light, dark, and system themes, keyboard navigation, reduced-motion support, a debug view, and an **Update** screen that checks this repository's releases.
+
+## CLI and local browser panel
+
+Install the CLI from a checkout or pin it to a release. Python 3.11 or newer is required for the standalone CLI.
+
+```sh
+pipx install 'git+https://github.com/aarefhosseini/Codex-Account-Manager.git@v0.1.0'
 codex-account --help
-```
-
-Update the Python package directly when you are running the CLI path instead of a packaged installer:
-
-```bash
-pipx upgrade codex-account-manager
-```
-
-## GUI
-
-The desktop app is the primary day-to-day experience for users who want local account control with desktop-native behavior.
-
-### Profiles
-
-Account table, usage visibility, switching, and local import or export workflows.
-
-![Codex Account Manager profiles GUI](docs/assets/screenshots/gui/profiles.png)
-
-### Auto Switch
-
-Rules, thresholds, ranking mode, switch chain management, and built-in test controls.
-
-![Codex Account Manager auto switch GUI](docs/assets/screenshots/gui/auto-switch.png)
-
-### Settings
-
-Refresh rules, native notifications, and status bar or tray controls.
-
-![Codex Account Manager settings GUI](docs/assets/screenshots/gui/settings.png)
-
-### Update
-
-Release status, packaged app update flow, and Python core sync details.
-
-![Codex Account Manager update GUI](docs/assets/screenshots/gui/update.png)
-
-### About
-
-Desktop shell and runtime details for the installed app.
-
-![Codex Account Manager about GUI](docs/assets/screenshots/gui/about.png)
-
-## Features
-
-- Desktop GUI for local Codex profile management, switching, rename, remove, and guided account add flows
-- Usage tracking for both `5H` and weekly limits with remaining percentages, reset timing, and health state visibility
-- Auto-switch automation with thresholds, ranking mode, switch chain controls, delay handling, and one-off or rapid test flows
-- Native OS notifications with warning thresholds and click-to-focus desktop behavior
-- macOS status bar and Windows or Linux tray integration
-- Windows taskbar usage overlay and mini-meter support where enabled
-- Local import and export with private `.camzip` archives
-- In-app release notes, release status, and desktop update guidance
-- Local-first privacy model with no hosted profile storage service
-
-## Why Use Codex Account Manager?
-
-- Manage multiple Codex accounts locally with named profiles instead of raw auth-file juggling.
-- Keep the active account and its usage state visible before limits interrupt work.
-- Switch faster from a desktop UI while preserving CLI access for automation and terminal-first workflows.
-- Stay local-first across macOS, Windows, and Linux without introducing a hosted account backend.
-
-## Privacy / Security
-
-Codex Account Manager is built for local-first account management:
-
-- No live API server or hosted backend is used by this project for storing your accounts.
-- The desktop app, local web panel, and Python services run on your machine.
-- Profile snapshots, settings, notification preferences, and migration archives remain on your system unless you explicitly export or share them.
-
-This project may call upstream services that Codex itself uses for account and usage operations, but Codex Account Manager does not add its own cloud account-storage service. See [SECURITY.md](SECURITY.md) for detailed storage and reporting guidance.
-
-## How the App Is Structured
-
-Codex Account Manager is one local-first system with three connected layers:
-
-- **Electron desktop app**:
-  - packaged GUI for daily use
-  - adds tray or menu-bar state, desktop-native notifications, update screens, and platform integrations such as the Windows taskbar overlay
-- **Python CLI core (`codex-account`)**:
-  - source of truth for profile storage, auth switching, usage collection, auto-switch logic, notifications, import/export, and local `/api/*` endpoints
-- **Local web panel (`codex-account ui`)**:
-  - browser-based control surface over the same Python backend
-  - remains available for users who prefer a local browser UI or need a lightweight fallback
-
-Because all layers share the same backend state, profile changes and usage status remain consistent between the desktop GUI, CLI, and local web panel.
-
-## CLI and Web Panel
-
-The CLI and local web panel remain available for advanced users, scripting, and developer workflows, but they are secondary to the packaged desktop app.
-
-Start the local web panel:
-
-```bash
+codex-account save work
+codex-account add personal --device-auth
+codex-account list --json
+codex-account usage-local --watch
+codex-account switch work
 codex-account ui
 ```
 
-Default local address:
+The browser panel opens on `127.0.0.1:4673` by default. The CLI also supports isolated commands with `run`, profile archive import and export, service autostart, and optional `codex-auth` commands. See the [CLI reference](docs/cli-reference.md), [local API](docs/ui-api.md), and [architecture](docs/architecture.md).
 
-- URL: `http://127.0.0.1:4673`
-- Host: `127.0.0.1`
-- Port: `4673`
+## Data and privacy
 
-Useful CLI commands:
+The app keeps profile credentials, backups, settings, and purchase dates on your device under `CODEX_HOME` (normally `~/.codex`). Quota and login operations contact the services that Codex uses. Update checks contact GitHub. A `.camzip` file contains authentication material. Keep exports private and omit credentials, logs with account details, and service tokens from public issue reports. See the [security policy](SECURITY.md) and [storage reference](docs/config-and-storage.md).
 
-```bash
-codex-account --help
-codex-account save work
-codex-account switch work
-codex-account current --json
-codex-account list --json
-codex-account export-profiles -o ./profiles.camzip
-codex-account import-profiles ./profiles.camzip
-codex-account electron
+## Build from source
+
+Use Python 3.11+, Node.js, and npm. The packaged build runs PyInstaller on the target operating system. Build the Windows installer on Windows with x64 Python, and the Apple Silicon package on an ARM64 Mac.
+
+```sh
+git clone https://github.com/aarefhosseini/Codex-Account-Manager.git
+cd Codex-Account-Manager
+python -m pip install -e .
+python -m pip install -r electron/requirements-python-core.txt
+cd electron
+npm ci
+npm run dev
 ```
 
-Useful command groups:
+Run `npm run dist:mac -- --arm64 --publish never` on Apple Silicon or `npm run dist:win -- --x64 --publish never` on Windows. The installer appears in `electron/dist`. The Linux build command is `npm run dist:linux -- --publish never`. Set `CAM_ELECTRON_PYTHON` if the build should use a specific Python executable.
 
-- Local profile workflows: `save`, `add`, `list`, `current`, `switch`, `rename`, `remove`, `run`
-- Usage monitoring: `usage-local`, `usage`
-- UI and desktop control: `ui`, `electron`, `ui-service`, `ui-autostart`
-- Advanced wrappers: `status`, `login`, `list-adv`, `switch-adv`, `import`, `remove-adv`, `config`, `daemon`, `clean`, `auth`
+Run the Python suite with `python -m unittest discover -s tests` at the repository root. Run `npm test` and `npm run build` inside `electron`. The Windows release workflow builds the installer and runs the bundled core's diagnostics on a Windows runner.
 
-## FAQ
+## Credits and license
 
-### Does this work on Windows, macOS, and Linux?
-
-Yes. The project is designed for cross-platform local use, with packaged desktop installers centered on macOS and Windows and Linux release assets provided when available.
-
-### Is this local-only?
-
-Yes. Local profile management, imports or exports, and UI state stay on your system unless you explicitly move an archive elsewhere.
-
-### Do I need Python installed first?
-
-Yes. Python `3.11+` is still required. The desktop app can guide setup, but it does not silently install Python for you.
-
-### Do I need Codex installed first?
-
-Yes. Codex CLI must already be installed and available as `codex` in your `PATH`.
-
-### Does the desktop app replace the CLI?
-
-No. The desktop app is the main GUI, but the CLI remains useful for scripts, terminal-first workflows, and advanced operations against the same local backend state.
-
-### How are credentials stored?
-
-Saved profile snapshots are stored locally under your Codex home and related local storage paths used by this tool. See [docs/config-and-storage.md](docs/config-and-storage.md) and [SECURITY.md](SECURITY.md) for details.
-
-### Which Codex clients are supported after switching?
-
-The app currently supports the Codex CLI and the Codex VS Code extension. On some OS or client combinations, switching updates the local auth immediately but the active client may still need a manual reload or restart before it starts using the newly switched account.
-
-## License
-
-MIT License. See [LICENSE](LICENSE).
+This project builds on [alisinaee/Codex-Account-Manager](https://github.com/alisinaee/Codex-Account-Manager). The upstream contributors wrote the original desktop app, CLI, and browser panel. The project is an independent community tool for Codex. See the [MIT license](LICENSE) and [contribution guide](CONTRIBUTING.md).

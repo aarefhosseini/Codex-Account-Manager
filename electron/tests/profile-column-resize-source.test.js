@@ -25,11 +25,11 @@ test("data table source includes header resize handles and pointer drag wiring",
   assert.match(source, /onColumnResize\?\./);
 });
 
-test("workspace error banner source includes a dismiss countdown and close button", () => {
+test("workspace error banner source keeps errors readable with a close button", () => {
   const source = fs.readFileSync(appSourcePath, "utf8");
 
   assert.match(source, /Close error/);
-  assert.match(source, /Dismiss in \{errorCountdownSeconds\}s/);
+  assert.match(source, /Action needs attention/);
   assert.match(source, /dialog-close workspace-error-close/);
 });
 

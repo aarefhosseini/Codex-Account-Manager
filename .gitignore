@@ -18,3 +18,5 @@ __pycache__/
 # Local environments and test caches
 .venv/
 .pytest_cache/
+release-artifacts/
+.private/

@@ -3,9 +3,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const PROJECT_REPO_URL = "https://github.com/alisinaee/Codex-Account-Manager";
+const PROJECT_REPO_URL = "https://github.com/aarefhosseini/Codex-Account-Manager";
 const PROJECT_RELEASES_URL = `${PROJECT_REPO_URL}/releases`;
-const PROJECT_RELEASES_API_URL = "https://api.github.com/repos/alisinaee/Codex-Account-Manager/releases";
+const PROJECT_RELEASES_API_URL = "https://api.github.com/repos/aarefhosseini/Codex-Account-Manager/releases";
 const PENDING_UPDATE_FILE = "pending-update.json";
 
 function pythonInstallUrl(platform = process.platform) {

@@ -12,7 +12,7 @@ const {
 test("buildCoreInstallSpecForVersion pins pipx installs to the matching release tag", () => {
   assert.equal(
     buildCoreInstallSpecForVersion("0.0.21"),
-    "git+https://github.com/alisinaee/Codex-Account-Manager.git@v0.0.21",
+    "git+https://github.com/aarefhosseini/Codex-Account-Manager.git@v0.0.21",
   );
 });
 
@@ -43,7 +43,7 @@ test("buildUnifiedUpdateStatus uses the Electron bundle version as current versi
   assert.equal(status.core_version, "v0.0.12");
   assert.equal(
     status.core_install_spec,
-    "git+https://github.com/alisinaee/Codex-Account-Manager.git@v0.0.21",
+    "git+https://github.com/aarefhosseini/Codex-Account-Manager.git@v0.0.21",
   );
 });
 
@@ -83,7 +83,7 @@ test("buildUnifiedUpdateStatus ignores release feed versions older than the inst
     releaseNotes: {
       status: "synced",
       status_text: "Synced from stale GitHub cache",
-      core_install_spec: "git+https://github.com/alisinaee/Codex-Account-Manager.git@v0.0.12",
+      core_install_spec: "git+https://github.com/aarefhosseini/Codex-Account-Manager.git@v0.0.12",
       releases: [
         { tag: "v0.0.12", published_at: "2026-04-23T10:00:00Z" },
       ],
@@ -97,7 +97,7 @@ test("buildUnifiedUpdateStatus ignores release feed versions older than the inst
   assert.equal(status.target_version, "v0.0.21");
   assert.equal(
     status.core_install_spec,
-    "git+https://github.com/alisinaee/Codex-Account-Manager.git@v0.0.21",
+    "git+https://github.com/aarefhosseini/Codex-Account-Manager.git@v0.0.21",
   );
 });
 

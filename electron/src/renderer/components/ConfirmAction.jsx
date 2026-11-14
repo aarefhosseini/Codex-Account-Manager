@@ -14,10 +14,10 @@ function ConfirmAction({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!armed) return undefined;
+    if (!armed || loading) return undefined;
     const timer = window.setTimeout(() => setArmed(false), 4000);
     return () => window.clearTimeout(timer);
-  }, [armed]);
+  }, [armed, loading]);
 
   async function handleConfirm() {
     if (loading) return;
@@ -43,7 +43,7 @@ function ConfirmAction({
 
   return (
     <span className={["confirm-inline-group", className].filter(Boolean).join(" ")}>
-      <Button variant="ghost" onClick={() => setArmed(false)}>
+      <Button variant="ghost" disabled={loading} onClick={() => setArmed(false)}>
         {cancelLabel}
       </Button>
       <Button

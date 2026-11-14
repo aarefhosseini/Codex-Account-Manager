@@ -1,4 +1,5 @@
 function usagePercentValue(usage) {
+  if (usage?.remaining_percent === null || usage?.remaining_percent === undefined || usage?.remaining_percent === "") return null;
   const value = Number(usage?.remaining_percent);
   if (!Number.isFinite(value)) {
     return null;
@@ -23,6 +24,7 @@ export function profilesFromState(state) {
     return {
       ...profile,
       ...usage,
+      subscription: profile.subscription || usage.subscription,
       is_current: isCurrent,
     };
   });

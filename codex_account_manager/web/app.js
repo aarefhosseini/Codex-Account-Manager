@@ -1906,11 +1906,10 @@ async function saveUiConfigPatch(patch){
 async function setEligibility(name, eligible){ await postApi("/api/auto-switch/account-eligibility", { name, eligible }); }
 const IS_MAC_CLIENT = /mac os|macintosh/i.test((navigator && navigator.userAgent) || "");
 function switchRequestBody(name){
-  if(IS_MAC_CLIENT) return { name };
-  return { name, close_only: true, no_restart: true };
+  return { name, no_restart: false };
 }
 async function switchProfile(name){
-  await postApi("/api/switch", switchRequestBody(name));
+  await postApi("/api/switch", switchRequestBody(name), { timeoutMs: 90000 });
 }
 function renderSwitchProgressState(){
   if(latestData.usage && Array.isArray(latestData.usage.profiles)){

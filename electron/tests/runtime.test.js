@@ -22,7 +22,7 @@ test("buildBootstrapInstallPlan installs pipx and the Python core through the se
 
   assert.deepEqual(plan.map((step) => [step.label, step.command, step.args]), [
     ["Install pipx", "/usr/bin/python3", ["-m", "pip", "install", "--user", "--break-system-packages", "pipx"]],
-    ["Install Codex Account Manager", "/usr/bin/python3", ["-m", "pipx", "install", "--force", "git+https://github.com/alisinaee/Codex-Account-Manager.git@main"]],
+    ["Install Codex Account Manager", "/usr/bin/python3", ["-m", "pipx", "install", "--force", "git+https://github.com/aarefhosseini/Codex-Account-Manager.git@main"]],
   ]);
 });
 
@@ -140,7 +140,7 @@ test("buildBootstrapInstallPlan skips pipx installation when a pipx binary is al
   });
 
   assert.deepEqual(plan.map((step) => [step.label, step.command, step.args]), [
-    ["Install Codex Account Manager", "/opt/homebrew/bin/pipx", ["install", "--force", "git+https://github.com/alisinaee/Codex-Account-Manager.git@main"]],
+    ["Install Codex Account Manager", "/opt/homebrew/bin/pipx", ["install", "--force", "git+https://github.com/aarefhosseini/Codex-Account-Manager.git@main"]],
   ]);
 });
 
@@ -172,7 +172,7 @@ test("buildBootstrapInstallPlan prefers Homebrew for pipx when pipx is missing o
 
   assert.deepEqual(plan.map((step) => [step.label, step.command, step.args]), [
     ["Install pipx", "/opt/homebrew/bin/brew", ["install", "pipx"]],
-    ["Install Codex Account Manager", "pipx", ["install", "--force", "git+https://github.com/alisinaee/Codex-Account-Manager.git@main"]],
+    ["Install Codex Account Manager", "pipx", ["install", "--force", "git+https://github.com/aarefhosseini/Codex-Account-Manager.git@main"]],
   ]);
 });
 
@@ -522,7 +522,7 @@ test("installPythonCore refreshes the Homebrew pipx command and streams progress
   assert.equal(spawned.length, 2);
   assert.deepEqual(spawned.map(([, args]) => args), [
     ["install", "pipx"],
-    ["install", "--force", "git+https://github.com/alisinaee/Codex-Account-Manager.git@main"],
+    ["install", "--force", "git+https://github.com/aarefhosseini/Codex-Account-Manager.git@main"],
   ]);
   assert.equal(spawned[0][0], "brew");
   assert.equal(spawned[1][0], "/opt/homebrew/bin/pipx");

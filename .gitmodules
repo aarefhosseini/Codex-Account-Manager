@@ -1,3 +1,0 @@
-[submodule ".private/ai"]
-	path = .private/ai
-	url = ../codex-account-manager-private.git

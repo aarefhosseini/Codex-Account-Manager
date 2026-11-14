@@ -3,6 +3,14 @@ const assert = require("node:assert/strict");
 
 const { buildUsageSummary, selectCurrentUsageRow } = require("../src/usage");
 
+test("missing or stale usage is never presented as zero percent quota", () => {
+  for (const value of [null, undefined, ""]) {
+    const payload = { current_profile: "work", profiles: [{ name: "work", usage_5h: { remaining_percent: value }, usage_weekly: { remaining_percent: 60 } }] };
+    assert.equal(buildUsageSummary(payload).available, false);
+  }
+  assert.equal(buildUsageSummary({ current_profile: "work", profiles: [{ name: "work", error: "http 401", usage_5h: { remaining_percent: 70 }, usage_weekly: { remaining_percent: 60 } }] }).available, false);
+});
+
 test("selectCurrentUsageRow prefers current_profile match", () => {
   const payload = {
     current_profile: "work",

@@ -84,6 +84,13 @@ function DataTable({
               ].filter(Boolean).join(" ")}
               onClick={column.sortable ? () => onSort?.(column.key) : undefined}
               title={column.title}
+              tabIndex={column.sortable ? 0 : undefined}
+              aria-sort={column.sortable ? (sort?.key === column.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none") : undefined}
+              onKeyDown={(event) => {
+                if (!column.sortable || event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return;
+                event.preventDefault();
+                onSort?.(column.key);
+              }}
             >
               <span className="table-header-label">
                 {column.label}
@@ -155,7 +162,6 @@ function DataTable({
               onRowClick(row, event);
             }}
             tabIndex={rowClickable ? 0 : undefined}
-            role={rowClickable ? "button" : undefined}
             aria-label={rowClickable
               ? (typeof rowAriaLabel === "function" ? rowAriaLabel(row) : rowAriaLabel || "Open details")
               : undefined}

@@ -6,6 +6,7 @@ import copy
 import contextlib
 import datetime as dt
 import difflib
+import functools
 import hashlib
 import io
 import json
@@ -32,12 +33,16 @@ from urllib.parse import parse_qs, quote, urlparse
 
 try:
     from .contracts import CommandResult
-    from . import native_notifications
+    from . import native_notifications, desktop, continuation
+    from .subscriptions import purchase_date, subscription_info
     from .services import DiagnosticsLogger, UiConfigService, UsageService
 except Exception:
     # Support direct script execution (python path/to/cli.py ...)
     from contracts import CommandResult  # type: ignore
     import native_notifications  # type: ignore
+    import desktop  # type: ignore
+    import continuation  # type: ignore
+    from subscriptions import purchase_date, subscription_info  # type: ignore
     from services import DiagnosticsLogger, UiConfigService, UsageService  # type: ignore
 
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
@@ -59,8 +64,7 @@ CAM_CONFIG_FILE = CAM_DIR / "config.json"
 CAM_LOG_FILE = CAM_DIR / "ui.log"
 CAM_LOG_MAX_BYTES = 2 * 1024 * 1024
 CAM_LOG_BACKUPS = 4
-APP_CANDIDATES = ("Codex", "CodexBar")
-DEFAULT_APP_VERSION = "0.0.21"
+DEFAULT_APP_VERSION = "0.1.0"
 
 
 def _build_ui_version(file_path: str = __file__) -> str:
@@ -83,8 +87,18 @@ _RAW_SUBPROCESS_RUN = subprocess.run
 _RAW_SUBPROCESS_CALL = subprocess.call
 EXPORT_SESSION_LOCK = threading.Lock()
 EXPORT_SESSIONS: dict[str, dict] = {}
+AUTH_OPERATION_LOCK = threading.RLock()
+PROFILE_METADATA_LOCK = threading.RLock()
 IMPORT_ANALYSIS_LOCK = threading.Lock()
 IMPORT_ANALYSES: dict[str, dict] = {}
+
+
+def auth_operation(fn):
+    @functools.wraps(fn)
+    def guarded(*args, **kwargs):
+        with AUTH_OPERATION_LOCK, PROFILE_METADATA_LOCK:
+            return fn(*args, **kwargs)
+    return guarded
 
 
 def _with_windows_hidden_subprocess(kwargs: dict) -> dict:
@@ -129,8 +143,8 @@ def load_app_version() -> str:
 
 
 APP_VERSION = load_app_version()
-PROJECT_RELEASES_URL = "https://github.com/alisinaee/Codex-Account-Manager/releases"
-GITHUB_RELEASES_API_URL = "https://api.github.com/repos/alisinaee/Codex-Account-Manager/releases"
+PROJECT_RELEASES_URL = "https://github.com/aarefhosseini/Codex-Account-Manager/releases"
+GITHUB_RELEASES_API_URL = "https://api.github.com/repos/aarefhosseini/Codex-Account-Manager/releases"
 RELEASE_NOTES_FALLBACK_FILE = PROJECT_ROOT / "docs" / "release-notes.md"
 RELEASE_NOTES_CACHE_TTL_SEC = 180.0
 
@@ -1221,6 +1235,7 @@ def refresh_codex_auth_via_app_server(timeout_sec: int = 12):
     return True, "refreshed", account_payload
 
 
+@auth_operation
 def refresh_and_sync_live_auth_snapshot(
     profile_name: str,
     *,
@@ -1228,6 +1243,8 @@ def refresh_and_sync_live_auth_snapshot(
     reason: str = "",
     timeout_sec: int = 12,
 ) -> bool:
+    if expected_principal_id and principal_id_from_auth(AUTH_FILE) != expected_principal_id:
+        return False
     ok, message, account_payload = refresh_codex_auth_via_app_server(timeout_sec=timeout_sec)
     if not ok:
         cam_log(
@@ -1433,6 +1450,8 @@ def find_same_email_profiles(email: str, exclude_name: str = "") -> list[str]:
 
 
 def ensure_profile_exists(name: str) -> Path:
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise RuntimeError("Invalid profile name.")
     source_auth = PROFILES_DIR / name / "auth.json"
     if not source_auth.exists():
         raise RuntimeError(f"profile '{name}' not found: {source_auth}")
@@ -1449,260 +1468,40 @@ def prepare_profile_home(name: str) -> Path:
     return profile_home
 
 
-def _platform_process_candidates() -> dict[str, list[str]]:
-    if sys.platform == "darwin":
-        # On macOS, avoid broad "codex" process matches because they can include
-        # non-app helper/CLI processes and make app restart behavior unstable.
-        return {
-            "Codex": [
-                "/Applications/Codex.app/Contents/MacOS/Codex",
-            ],
-            "CodexBar": [
-                "/Applications/CodexBar.app/Contents/MacOS/CodexBar",
-            ],
-        }
-    if sys.platform.startswith("win"):
-        return {
-            "Codex": [
-                "Codex.exe",
-                "codex.exe",
-            ],
-            "CodexBar": [
-                "CodexBar.exe",
-                "codexbar.exe",
-            ],
-        }
-    return {
-        "Codex": [
-            "codex",
-        ],
-        "CodexBar": [
-            "codexbar",
-        ],
-    }
+def _configured_codex_app_path() -> Path | None:
+    cfg = _codex_project_config()
+    key = "app_path_macos" if sys.platform == "darwin" else ("app_path_windows" if sys.platform.startswith("win") else "app_path_linux")
+    raw = _config_str(cfg, key)
+    return Path(raw).expanduser() if raw else None
 
 
-def _proc_running(pattern: str) -> bool:
-    try:
-        if sys.platform.startswith("win"):
-            image = Path(pattern).name.lower()
-            if not image.endswith(".exe"):
-                image = f"{image}.exe"
-            p = _subprocess_run(
-                ["tasklist", "/FO", "CSV", "/NH", "/FI", f"IMAGENAME eq {image}"],
-                capture_output=True,
-                text=True,
-            )
-            if p.returncode != 0:
-                return False
-            return image in p.stdout.lower()
-        if shutil.which("pgrep"):
-            p = _subprocess_run(
-                ["pgrep", "-f", pattern],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            return p.returncode == 0
-    except Exception:
-        return False
-    return False
-
-
-def _macos_app_bundle_path(app_name: str) -> Path | None:
-    if sys.platform != "darwin":
-        return None
-    candidates = _platform_process_candidates().get(str(app_name or "").strip(), [])
-    for candidate in candidates:
-        path = Path(candidate)
-        try:
-            bundle = path.parents[2]
-        except IndexError:
-            continue
-        if bundle.suffix == ".app":
-            return bundle
-    return None
+def _desktop_apps():
+    return desktop.discover_apps(_configured_codex_app_path(), run=_subprocess_run)
 
 
 def detect_running_app_name():
-    candidates = _platform_process_candidates()
-    for app_name in APP_CANDIDATES:
-        for proc_pattern in candidates.get(app_name, []):
-            if _proc_running(proc_pattern):
-                return app_name
-    return None
+    apps = _desktop_apps()
+    rows = desktop.desktop_processes(desktop.process_snapshot(_subprocess_run), apps)
+    return Path(rows[0]["executable"]).name if rows else None
 
 
 def codex_running() -> bool:
-    try:
-        return detect_running_app_name() is not None
-    except Exception:
-        return False
+    # Inspection errors must propagate: an unknown process state is not "closed".
+    return detect_running_app_name() is not None
 
 
 def stop_codex() -> bool:
-    candidates = _platform_process_candidates()
-    touched = False
-    if sys.platform == "darwin":
-        for app_name in APP_CANDIDATES:
-            bundle = _macos_app_bundle_path(app_name)
-            if not bundle:
-                continue
-            script = f'tell application (POSIX file "{bundle}" as alias) to quit'
-            _subprocess_run(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            touched = True
-        for _ in range(40):
-            if not codex_running():
-                break
-            time.sleep(0.15)
-        if codex_running() and shutil.which("killall"):
-            # Fallback only to strict app binary names on macOS.
-            for app_binary in ("Codex", "CodexBar"):
-                _subprocess_run(["killall", "-q", app_binary], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                touched = True
-            for _ in range(20):
-                if not codex_running():
-                    break
-                time.sleep(0.15)
-        return touched
-    for app_name in APP_CANDIDATES:
-        for proc_pattern in candidates.get(app_name, []):
-            if sys.platform.startswith("win"):
-                image = Path(proc_pattern).name
-                if not image.lower().endswith(".exe"):
-                    image = f"{image}.exe"
-                _subprocess_run(["taskkill", "/F", "/T", "/IM", image], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                touched = True
-            elif shutil.which("pkill"):
-                _subprocess_run(["pkill", "-f", proc_pattern], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                touched = True
-            elif shutil.which("killall"):
-                _subprocess_run(["killall", "-q", Path(proc_pattern).name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                touched = True
-    if sys.platform.startswith("win"):
-        # Broader fallback for Store/app-hosted builds that may not run under Codex.exe image names.
-        ps = shutil.which("powershell") or shutil.which("pwsh")
-        if ps:
-            script = (
-                "$ErrorActionPreference='SilentlyContinue';"
-                "$targets=Get-Process | Where-Object {"
-                "$n=$_.ProcessName.ToLower();"
-                "$path='';"
-                "try { $path=$_.Path } catch {};"
-                "$p=$path.ToLower();"
-                "$n -like 'codex*' -or $n -like 'codexbar*' -or $n -like 'chatgpt*' -or "
-                "$p -like '*openai*codex*' -or $p -like '*chatgpt*'"
-                "};"
-                "foreach($t in $targets){"
-                "try { taskkill /F /T /PID $t.Id | Out-Null } catch {"
-                "  try { Stop-Process -Id $t.Id -Force -ErrorAction SilentlyContinue } catch {}"
-                "}"
-                "}"
-            )
-            try:
-                _subprocess_run([ps, "-NoProfile", "-Command", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=4)
-                touched = True
-            except Exception:
-                pass
-    for _ in range(20):
-        if not codex_running():
-            break
-        time.sleep(0.15)
-    return touched
+    desktop.stop_apps(_desktop_apps(), run=_subprocess_run)
+    return True
 
 
-def _windows_force_kill_codex_processes() -> int:
-    if not sys.platform.startswith("win"):
-        return 0
-    ps = shutil.which("powershell") or shutil.which("pwsh")
-    if not ps:
-        return 0
-    script = (
-        "$ErrorActionPreference='SilentlyContinue';"
-        "$targets=Get-Process | Where-Object {"
-        "$n=$_.ProcessName.ToLower();"
-        "$path='';"
-        "try { $path=$_.Path } catch {};"
-        "$p=$path.ToLower();"
-        "$n -like 'codex*' -or $n -like 'codexbar*' -or $n -like 'chatgpt*' -or $n -like 'openai*' -or "
-        "$p -like '*openai*codex*' -or $p -like '*chatgpt*'"
-        "};"
-        "$k=0;"
-        "foreach($t in $targets){"
-        "  try { Stop-Process -Id $t.Id -Force -ErrorAction Stop; $k++ } catch {}"
-        "};"
-        "Write-Output $k"
-    )
-    try:
-        proc = _subprocess_run([ps, "-NoProfile", "-Command", script], capture_output=True, text=True, timeout=6)
-        if proc.returncode != 0:
-            return 0
-        out = (proc.stdout or "").strip()
-        return int(out) if out.isdigit() else 0
-    except Exception:
-        return 0
-
-
-def _windows_graceful_close_codex_windows() -> tuple[int, int]:
-    if not sys.platform.startswith("win"):
-        return 0, 0
-    ps = shutil.which("powershell") or shutil.which("pwsh")
-    if not ps:
-        return 0, 0
-    # Close top-level Codex/ChatGPT windows gracefully, then report remaining windowed processes.
-    script = (
-        "$ErrorActionPreference='SilentlyContinue';"
-        "$all=Get-Process | Where-Object {"
-        "$n=$_.ProcessName.ToLower();"
-        "$path='';"
-        "try { $path=$_.Path } catch {};"
-        "$p=$path.ToLower();"
-        "$n -like 'codex*' -or $n -like 'codexbar*' -or $n -like 'chatgpt*' -or "
-        "$p -like '*openai*codex*' -or $p -like '*chatgpt*'"
-        "};"
-        "$wins=@($all | Where-Object { $_.MainWindowHandle -ne 0 });"
-        "$attempt=[int]$wins.Count;"
-        "foreach($w in $wins){"
-        "  try { [void]$w.CloseMainWindow() } catch {}"
-        "};"
-        "Start-Sleep -Milliseconds 900;"
-        "$all2=Get-Process | Where-Object {"
-        "$n=$_.ProcessName.ToLower();"
-        "$path='';"
-        "try { $path=$_.Path } catch {};"
-        "$p=$path.ToLower();"
-        "$n -like 'codex*' -or $n -like 'codexbar*' -or $n -like 'chatgpt*' -or "
-        "$p -like '*openai*codex*' -or $p -like '*chatgpt*'"
-        "};"
-        "$alive=[int](@($all2 | Where-Object { $_.MainWindowHandle -ne 0 }).Count);"
-        "Write-Output ($attempt.ToString() + ',' + $alive.ToString())"
-    )
-    try:
-        proc = _subprocess_run([ps, "-NoProfile", "-Command", script], capture_output=True, text=True, timeout=7)
-        if proc.returncode != 0:
-            return 0, 0
-        raw = (proc.stdout or "").strip().splitlines()
-        line = raw[-1].strip() if raw else "0,0"
-        left, right = (line.split(",", 1) + ["0"])[:2]
-        attempted = int(left.strip()) if left.strip().isdigit() else 0
-        alive = int(right.strip()) if right.strip().isdigit() else 0
-        return attempted, alive
-    except Exception:
-        return 0, 0
-
-
-def _configured_codex_app_path() -> Path | None:
-    cfg = _codex_project_config()
-    if sys.platform == "darwin":
-        key = "app_path_macos"
-    elif sys.platform.startswith("win"):
-        key = "app_path_windows"
-    else:
-        key = "app_path_linux"
-    raw = _config_str(cfg, key)
-    if not raw:
-        return None
-    p = Path(raw).expanduser()
-    return p if p.exists() else None
+def start_codex(preferred_app_name: str = "", preferred_exec_path: str = "") -> bool:
+    apps = _desktop_apps()
+    if not apps:
+        return False
+    target = next((app for app in apps if app.executable == preferred_exec_path), apps[0])
+    desktop.start_app(target, run=_subprocess_run)
+    return True
 
 
 def _log_runtime_safe(level: str, message: str, details=None) -> None:
@@ -1710,127 +1509,6 @@ def _log_runtime_safe(level: str, message: str, details=None) -> None:
         log_runtime(level, message, details)
     except Exception:
         pass
-
-
-def _detect_running_codex_executable_windows() -> str | None:
-    if not sys.platform.startswith("win"):
-        return None
-    ps = shutil.which("powershell") or shutil.which("pwsh")
-    if not ps:
-        return None
-    script = (
-        "$ErrorActionPreference='SilentlyContinue';"
-        "$p=Get-Process | Where-Object {"
-        "$n=$_.ProcessName.ToLower();"
-        "$n -eq 'codex' -or $n -eq 'codexbar' -or $n -like 'codex*'"
-        "} | Select-Object -First 1 -ExpandProperty Path;"
-        "if($p){Write-Output $p}"
-    )
-    try:
-        proc = _subprocess_run([ps, "-NoProfile", "-Command", script], capture_output=True, text=True, timeout=3)
-    except Exception:
-        return None
-    if proc.returncode != 0:
-        return None
-    path = (proc.stdout or "").strip().strip('"')
-    if not path:
-        return None
-    p = Path(path)
-    return str(p) if p.exists() else None
-
-
-def _start_windows_appsfolder_codex() -> bool:
-    if not sys.platform.startswith("win"):
-        return False
-    ps = shutil.which("powershell") or shutil.which("pwsh")
-    if not ps:
-        return False
-    script = (
-        "$ErrorActionPreference='SilentlyContinue';"
-        "$app=Get-StartApps | Where-Object { $_.Name -like '*Codex*' } | Select-Object -First 1;"
-        "if(-not $app){ exit 1 }"
-        "Start-Process ('shell:AppsFolder\\\\' + $app.AppID) | Out-Null;"
-        "exit 0"
-    )
-    try:
-        proc = _subprocess_run([ps, "-NoProfile", "-Command", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=4)
-    except Exception:
-        return False
-    return proc.returncode == 0
-
-
-def start_codex(preferred_app_name: str = "", preferred_exec_path: str = "") -> bool:
-    app_order = []
-    if preferred_app_name:
-        app_order.append(preferred_app_name)
-    app_order.extend([x for x in APP_CANDIDATES if x != preferred_app_name])
-    configured = _configured_codex_app_path()
-    if configured:
-        try:
-            if sys.platform.startswith("win"):
-                subprocess.Popen([str(configured)], creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-            else:
-                subprocess.Popen([str(configured)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-            _log_runtime_safe("info", "codex.start success configured", {"path": str(configured)})
-            return True
-        except Exception as e:
-            _log_runtime_safe("warn", "codex.start failed configured", {"path": str(configured), "error": str(e)})
-    if sys.platform.startswith("win"):
-        launchers: list[str] = []
-        launch_errors: list[dict] = []
-        if preferred_exec_path:
-            launchers.append(str(preferred_exec_path))
-        try:
-            launchers.append(resolve_codex_cli())
-        except Exception:
-            pass
-        for candidate in ("codex", "Codex.exe", "codex.exe"):
-            hit = shutil.which(candidate)
-            if hit:
-                launchers.append(hit)
-        seen: set[str] = set()
-        for launcher in launchers:
-            key = str(launcher).strip().lower()
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            try:
-                subprocess.Popen(
-                    [launcher],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-                )
-                _log_runtime_safe("info", "codex.start success launcher", {"launcher": launcher})
-                return True
-            except Exception as e:
-                launch_errors.append({"launcher": launcher, "error": str(e)})
-                continue
-        if _start_windows_appsfolder_codex():
-            _log_runtime_safe("info", "codex.start success appsfolder", {})
-            return True
-        _log_runtime_safe("warn", "codex.start failed windows", {"attempts": launch_errors})
-        return False
-    if sys.platform == "darwin":
-        for app_name in app_order:
-            bundle = _macos_app_bundle_path(app_name)
-            if not bundle:
-                continue
-            for _ in range(3):
-                p = _subprocess_run(["open", str(bundle)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if p.returncode == 0:
-                    return True
-                time.sleep(0.35)
-        return False
-    codex_bin = shutil.which("codex")
-    if codex_bin:
-        try:
-            subprocess.Popen([codex_bin], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-            return True
-        except Exception:
-            return False
-    return False
 
 
 def _codex_cli_fallback_candidates() -> list[Path]:
@@ -2247,6 +1925,7 @@ def parse_status_output(text: str):
     return status
 
 
+@auth_operation
 def write_profile(name: str, source_auth: Path, source_label: str, overwrite: bool) -> None:
     name = (name or "").strip()
     _validate_target_profile_name(name, overwrite=overwrite)
@@ -2272,14 +1951,16 @@ def write_profile(name: str, source_auth: Path, source_label: str, overwrite: bo
     _copy_auth_file_with_repair(source_auth, target_auth)
     _set_private_permissions(target_auth)
 
+    meta_path = target_dir / "meta.json"
+    old_meta = load_json(meta_path) if meta_path.exists() else {}
     meta = {
+        **old_meta,
         "name": name,
-        "saved_at": dt.datetime.now().isoformat(),
+        "saved_at": old_meta.get("saved_at") or dt.datetime.now().isoformat(),
         "account_hint": account_hint_from_auth(target_auth),
         "source_auth": source_label,
     }
-    with (target_dir / "meta.json").open("w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
+    atomic_write_json(meta_path, meta)
 
     print(f"saved profile '{name}' -> {target_auth}")
     print(f"account: {meta['account_hint']}")
@@ -2719,6 +2400,7 @@ def cmd_import_profiles(archive_path: str, apply: bool = False, overwrite: bool 
         return 1
 
 
+@auth_operation
 def sync_profile_auth_snapshot(
     name: str,
     source_auth: Path,
@@ -2775,8 +2457,7 @@ def sync_profile_auth_snapshot(
     meta["last_synced_at"] = dt.datetime.now().isoformat()
     if not meta.get("saved_at"):
         meta["saved_at"] = dt.datetime.now().isoformat()
-    with meta_path.open("w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
+    atomic_write_json(meta_path, meta)
     return True
 
 
@@ -2880,6 +2561,7 @@ def collect_list_data(config: dict | None = None):
         if pid and len(id_groups.get(pid, [])) > 1:
             same_principal_with = [x for x in id_groups[pid] if x != p.name]
         saved_at = None
+        meta = {}
         hint = None
         if meta_path.exists():
             try:
@@ -2897,6 +2579,7 @@ def collect_list_data(config: dict | None = None):
                 "name": p.name,
                 "account_hint": hint,
                 "saved_at": saved_at,
+                "subscription": subscription_info(meta.get("purchased_at")),
                 "account_id": account_id_from_auth(auth_path),
                 "same_principal": len(same_principal_with) > 0,
                 "same_principal_with": same_principal_with,
@@ -3059,6 +2742,7 @@ def _build_usage_profile_row(profile_dir: Path, context: dict, timeout_sec: int)
     entry = profile_meta.get(p.name) or {}
     display_email = entry.get("email", "-")
     saved_at = None
+    meta = {}
     if meta_path.exists():
         try:
             meta = load_json(meta_path)
@@ -3118,6 +2802,7 @@ def _build_usage_profile_row(profile_dir: Path, context: dict, timeout_sec: int)
         "same_principal": same,
         "error": err or None,
         "saved_at": saved_at,
+        "subscription": subscription_info(meta.get("purchased_at")),
         "auto_switch_eligible": bool(eligibility.get(p.name, False)),
     }
 
@@ -3363,142 +3048,97 @@ def cmd_current(as_json: bool = False) -> int:
     return 0
 
 
-def cmd_switch(name: str, restart_codex: bool) -> int:
-    ensure_dirs()
+def cmd_switch(name: str, restart_codex: bool, close_only: bool = False, resume_work: bool = False) -> int:
+    if not AUTH_OPERATION_LOCK.acquire(timeout=15):
+        print("error: Another account operation is in progress. Wait for it to finish and retry.")
+        return 409
     try:
-        source_auth = ensure_profile_exists(name)
-    except RuntimeError as e:
-        print(f"error: {e}")
-        _log_runtime_safe("error", "switch failed missing profile", {"name": name, "error": str(e)})
+        return _perform_profile_switch(name, restart_codex, close_only, resume_work)
+    except Exception as error:
+        print(f"error: {error}")
+        _log_runtime_safe("error", "switch failed", {"name": name, "error": str(error)})
         return 1
+    finally:
+        AUTH_OPERATION_LOCK.release()
 
-    AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    running_app = None
-    running_exec_path = ""
-    if restart_codex:
+def _perform_profile_switch(name: str, restart_codex: bool, close_only: bool, resume_work: bool) -> int:
+    ensure_dirs()
+    source_auth = ensure_profile_exists(name)
+    target_data = load_json(source_auth)
+    if not isinstance(target_data, dict) or not (target_data.get("tokens") or target_data.get("OPENAI_API_KEY") or target_data.get("id_token")):
+        raise RuntimeError("Saved account credentials are invalid. Re-login to this profile before switching.")
+    apps = _desktop_apps() if restart_codex or close_only else []
+    if (restart_codex or close_only) and not apps:
+        raise RuntimeError("Codex desktop app was not found. Set its app_path in config.json and retry. Account was not changed.")
+    # Remember the actual running app, rather than launching a CLI with the same name.
+    rows = desktop.desktop_processes(desktop.process_snapshot(_subprocess_run), apps) if apps else []
+    launch_app = next((app for app in apps if any(r["executable"] == app.executable for r in rows)), apps[0] if apps else None)
+    resume_url = desktop.last_thread_url(CODEX_HOME) if restart_codex else ""
+    resume_cli = ""
+    if restart_codex and resume_work:
+        if not resume_url:
+            raise RuntimeError("Cannot identify the previous local chat. Open the chat in Codex, or turn off Continue unfinished work, then retry. Account was not changed.")
         try:
-            running_app = detect_running_app_name()
+            fallback = resolve_codex_cli()
         except Exception:
-            running_app = None
-        if sys.platform.startswith("win"):
-            try:
-                running_exec_path = _detect_running_codex_executable_windows() or ""
-            except Exception:
-                running_exec_path = ""
-    _log_runtime_safe(
-        "info",
-        "switch begin",
-        {"name": name, "restart_codex": bool(restart_codex), "running_app": running_app, "running_exec_path": running_exec_path},
-    )
-    if restart_codex and running_app:
-        try:
-            stop_codex()
-            _log_runtime_safe("info", "switch stop_codex requested", {"running_app": running_app})
-        except Exception:
-            pass
-
+            fallback = ""
+        resume_cli = continuation.find_resume_cli(apps, fallback, CODEX_HOME, run=_subprocess_run)
+    if apps:
+        print("Closing Codex and waiting for its background processes...")
+        desktop.stop_apps(apps, run=_subprocess_run)
+        if desktop.desktop_processes(desktop.process_snapshot(_subprocess_run), apps):
+            raise RuntimeError("Codex is still running. Account was not changed; close Codex and retry.")
+    # Save refreshed credentials from the outgoing account after it has fully exited.
     if AUTH_FILE.exists():
-        backup = BACKUPS_DIR / f"auth-{now_stamp()}.json"
-        shutil.copy2(AUTH_FILE, backup)
+        old_id = principal_id_from_auth(AUTH_FILE)
+        for row in collect_list_data():
+            if old_id and profile_principal_id(row["name"]) == old_id:
+                sync_profile_auth_snapshot(row["name"], AUTH_FILE, str(AUTH_FILE), expected_principal_id=old_id)
+        target_data = load_json(source_auth)
+    AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+    previous = load_json(AUTH_FILE) if AUTH_FILE.exists() else None
+    if previous is not None:
+        backup = BACKUPS_DIR / f"auth-{now_stamp()}-{secrets.token_hex(4)}.json"
+        atomic_write_json(backup, previous)
         _set_private_permissions(backup)
-
     try:
-        shutil.copy2(source_auth, AUTH_FILE)
-    except PermissionError as e:
-        repaired = _ensure_windows_user_writable(AUTH_FILE)
-        if repaired:
-            try:
-                shutil.copy2(source_auth, AUTH_FILE)
-            except PermissionError as e2:
-                msg = (
-                    f"cannot write auth file ({AUTH_FILE}). It is locked by a running app or denied by file permissions."
-                )
-                print(f"error: {msg}")
-                print("hint: close Codex/ChatGPT windows and verify your user has write access to auth.json")
-                _log_runtime_safe("error", "switch auth copy permission denied after repair", {"name": name, "target_auth": str(AUTH_FILE), "repaired": repaired, "error": str(e2)})
-                return 1
+        atomic_write_json(AUTH_FILE, target_data)
+        _set_private_permissions(AUTH_FILE)
+        if load_json(AUTH_FILE) != target_data:
+            raise RuntimeError("Written account credentials could not be verified.")
+    except Exception:
+        if previous is not None:
+            atomic_write_json(AUTH_FILE, previous)
+            _set_private_permissions(AUTH_FILE)
         else:
-            msg = (
-                f"cannot write auth file ({AUTH_FILE}). It is locked by a running app or denied by file permissions."
-            )
-            print(f"error: {msg}")
-            print("hint: close Codex/ChatGPT windows and verify your user has write access to auth.json")
-            _log_runtime_safe("error", "switch auth copy permission denied", {"name": name, "target_auth": str(AUTH_FILE), "repaired": repaired, "error": str(e)})
-            return 1
-    _set_private_permissions(AUTH_FILE)
-    _log_runtime_safe("info", "switch auth copied", {"name": name, "source_auth": str(source_auth), "target_auth": str(AUTH_FILE)})
-
-    switched_id = principal_id_from_auth(AUTH_FILE)
-    refresh_and_sync_live_auth_snapshot(
-        name,
-        expected_principal_id=switched_id,
-        reason="profile-switch",
-        timeout_sec=12,
-    )
-
-    print(f"switched to profile '{name}'")
-    print(f"active account: {account_hint_from_auth(AUTH_FILE)}")
-    switched_id = principal_id_from_auth(AUTH_FILE)
-    same = find_same_principal_profiles(switched_id, exclude_name=name)
-    if same:
-        print(f"note: '{name}' has same principal id as: {', '.join(same)}")
-        print("note: this switch may not change your effective canonical account")
-        _log_runtime_safe("warn", "switch same principal", {"name": name, "same_with": same, "principal_id": switched_id})
-
+            AUTH_FILE.unlink(missing_ok=True)
+        raise RuntimeError("Could not write account credentials. Previous account was restored; check auth.json permissions and retry.") from None
+    # Refresh only after the old desktop and its app-server have stopped.
+    expected_id = _principal_id_from_data(target_data)
+    refresh_and_sync_live_auth_snapshot(name, expected_principal_id=expected_id, reason="profile-switch", timeout_sec=12)
+    if expected_id and principal_id_from_auth(AUTH_FILE) != expected_id:
+        if previous is not None:
+            atomic_write_json(AUTH_FILE, previous)
+        else:
+            AUTH_FILE.unlink(missing_ok=True)
+        raise RuntimeError("Account verification failed after refresh. Previous account was restored; re-login to the target profile and retry.")
     if restart_codex:
-        started = False
+        print("Reopening Codex...")
         try:
-            started = start_codex(preferred_app_name=running_app or "Codex", preferred_exec_path=running_exec_path)
-        except Exception:
-            started = False
-        _log_runtime_safe("info", "switch restart result", {"name": name, "started": bool(started)})
-        if started:
-            print("Codex/CodexBar restart requested")
-        else:
-            print("warning: automatic Codex restart is unavailable on this system; start it manually if needed")
-    else:
-        print("start Codex manually if needed")
+            desktop.start_app(launch_app, run=_subprocess_run, resume_url=resume_url)
+        except Exception as error:
+            raise RuntimeError(f"Account changed to '{name}', but reopening Codex failed: {error}") from error
+        print("Codex reopened. " + ("Previous chat link opened." if resume_url else "No previous chat link was available; Codex will restore its own window."))
+        if resume_cli:
+            print("Sending continuation to the previous chat...")
+            try:
+                continuation.continue_thread(resume_cli, resume_url.rsplit("/", 1)[-1], CODEX_HOME, run=_subprocess_run)
+            except Exception as error:
+                raise RuntimeError(f"Account changed to '{name}' and Codex reopened, but automatic continuation needs attention: {error}") from error
+            print("Continuation message queued for the previous chat.")
+    print(f"switched to profile '{name}'")
     return 0
-
-
-def restart_codex_app(preferred_app_name: str = "", preferred_exec_path: str = "") -> bool:
-    running_app = (preferred_app_name or "").strip() or None
-    running_exec_path = (preferred_exec_path or "").strip()
-    if not running_app:
-        try:
-            running_app = detect_running_app_name()
-        except Exception:
-            running_app = None
-    if sys.platform.startswith("win") and not running_exec_path:
-        try:
-            running_exec_path = _detect_running_codex_executable_windows() or ""
-        except Exception:
-            running_exec_path = ""
-    if running_app:
-        try:
-            stop_codex()
-            _log_runtime_safe("info", "restart stop_codex requested", {"running_app": running_app})
-        except Exception as e:
-            _log_runtime_safe("warn", "restart stop_codex failed", {"running_app": running_app, "error": str(e)})
-    started = False
-    try:
-        started = start_codex(preferred_app_name=running_app or "Codex", preferred_exec_path=running_exec_path)
-    except Exception as e:
-        _log_runtime_safe("warn", "restart start_codex exception", {"error": str(e)})
-        started = False
-    _log_runtime_safe(
-        "info",
-        "restart final result",
-        {
-            "started": bool(started),
-            "running_app": running_app,
-            "running_exec_path": running_exec_path,
-            "preferred_app_name": preferred_app_name,
-            "preferred_exec_path": preferred_exec_path,
-        },
-    )
-    return started
 
 
 def cmd_run(name: str, command_args) -> int:
@@ -4590,6 +4230,7 @@ def cmd_ui_serve(host: str, port: int, no_open: bool, interval_sec: float, idle_
                     "same_principal": bool(item.get("same_principal")),
                     "error": None,
                     "saved_at": item.get("saved_at"),
+                    "subscription": item.get("subscription"),
                     "auto_switch_eligible": bool(item.get("auto_switch_eligible", False)),
                 }
             )
@@ -4621,37 +4262,19 @@ def cmd_ui_serve(host: str, port: int, no_open: bool, interval_sec: float, idle_
             usage_cache["timeout"] = timeout_sec
         return merged
 
-    def execute_profile_switch(
-        target: str,
-        restart_codex: bool,
-        source: str,
-        preferred_restart_app: str = "",
-        preferred_restart_exec: str = "",
-        schedule_deferred_restart: bool = False,
-    ) -> tuple[int, str, str]:
+    def execute_profile_switch(target: str, restart_codex: bool, source: str, close_only: bool = False, resume_work: bool | None = None) -> tuple[int, str, str]:
         with runtime["switch_lock"]:
             if runtime.get("switch_in_flight"):
-                active_target = str(runtime.get("switch_target") or "").strip() or "unknown"
-                return 409, "", f"switch already in progress for '{active_target}'"
+                return 409, "", "Another switch is in progress. Wait for it to finish."
             runtime["switch_in_flight"] = True
             runtime["switch_target"] = target
             runtime["switch_started_at"] = time.time()
         try:
-            rc, out, err = _capture_fn(lambda: cmd_switch(target, restart_codex=False))
-            if rc == 0:
-                invalidate_usage_cache("profile-switch")
-                if restart_codex:
-                    if schedule_deferred_restart:
-                        def _deferred_restart():
-                            try:
-                                time.sleep(0.8)
-                                restart_codex_app(preferred_app_name=preferred_restart_app, preferred_exec_path=preferred_restart_exec)
-                            except Exception as e:
-                                _log_runtime_safe("warn", "deferred restart failed", {"error": str(e), "name": target})
-                        threading.Thread(target=_deferred_restart, daemon=True).start()
-                    else:
-                        restart_codex_app(preferred_app_name=preferred_restart_app, preferred_exec_path=preferred_restart_exec)
-            return rc, out, err
+            if resume_work is None:
+                resume_work = source in {"manual-switch", "auto-switch", "auto-switch-run-once", "auto-switch-run-switch"}
+            result = _capture_fn(lambda: cmd_switch(target, restart_codex=restart_codex, close_only=close_only, resume_work=resume_work))
+            invalidate_usage_cache("profile-switch")
+            return result
         finally:
             with runtime["switch_lock"]:
                 runtime["switch_in_flight"] = False
@@ -4738,7 +4361,6 @@ def cmd_ui_serve(host: str, port: int, no_open: bool, interval_sec: float, idle_
                     target=target,
                     restart_codex=True,
                     source="rapid-test",
-                    schedule_deferred_restart=False,
                 )
                 if rc == 0:
                     runtime["last_switch_ts"] = time.time()
@@ -4839,7 +4461,6 @@ def cmd_ui_serve(host: str, port: int, no_open: bool, interval_sec: float, idle_
                     target=str(candidate.get("name")),
                     restart_codex=True,
                     source="auto-switch",
-                    schedule_deferred_restart=False,
                 )
                 if rc == 0:
                     runtime["last_switch_ts"] = now
@@ -5105,6 +4726,20 @@ def cmd_ui_serve(host: str, port: int, no_open: bool, interval_sec: float, idle_
                 if not payload:
                     return _json_error("NOT_FOUND", "session not found", 404)
                 return _json_ok(payload)
+            if self.command == "POST" and path == "/api/local/subscription":
+                try:
+                    name = str(body.get("name") or "").strip()
+                    with PROFILE_METADATA_LOCK:
+                        ensure_profile_exists(name)
+                        purchased = purchase_date(body.get("purchased_at"))
+                        meta_path = PROFILES_DIR / name / "meta.json"
+                        meta = load_json(meta_path) if meta_path.exists() else {"name": name}
+                        meta["purchased_at"] = purchased
+                        atomic_write_json(meta_path, meta)
+                    invalidate_usage_cache("subscription-updated")
+                    return _json_ok({"name": name, "subscription": subscription_info(purchased)})
+                except (ValueError, RuntimeError, OSError) as error:
+                    return _json_error("SUBSCRIPTION_FAILED", str(error), 400)
             if self.command == "POST" and path in ("/api/switch", "/api/local/switch"):
                 name = str(body.get("name", "")).strip()
                 if not name:
@@ -5113,48 +4748,12 @@ def cmd_ui_serve(host: str, port: int, no_open: bool, interval_sec: float, idle_
                 close_only = bool_value(body.get("close_only"), False)
                 if close_only:
                     restart = False
-                preferred_restart_app = ""
-                preferred_restart_exec = ""
-                if restart:
-                    try:
-                        preferred_restart_app = detect_running_app_name() or ""
-                    except Exception:
-                        preferred_restart_app = ""
-                if restart and sys.platform.startswith("win"):
-                    try:
-                        preferred_restart_exec = _detect_running_codex_executable_windows() or ""
-                    except Exception:
-                        preferred_restart_exec = ""
-                if close_only:
-                    try:
-                        stop_codex()
-                        _log_runtime_safe(
-                            "info",
-                            "switch close_only stop requested",
-                            {"name": name, "preferred_restart_app": preferred_restart_app, "preferred_restart_exec": preferred_restart_exec},
-                        )
-                    except Exception as e:
-                        _log_runtime_safe("warn", "switch close_only stop failed", {"name": name, "error": str(e)})
-                # Apply profile switch first, then restart asynchronously so the HTTP request can complete.
-                rc, out, err = execute_profile_switch(
-                    target=name,
-                    restart_codex=restart,
-                    source="manual-switch",
-                    preferred_restart_app=preferred_restart_app,
-                    preferred_restart_exec=preferred_restart_exec,
-                    schedule_deferred_restart=bool(restart),
-                )
+                rc, out, err = execute_profile_switch(target=name, restart_codex=restart, close_only=close_only,
+                                                     resume_work=bool_value(body.get("continue_work"), True), source="manual-switch")
                 payload = _command_result("local.switch", rc, out, err)
                 if rc != 0:
-                    if rc == 409:
-                        return _json_error("CONFLICT", "switch is already in progress", 409, payload)
-                    return _json_error("COMMAND_FAILED", "local switch failed", 400, payload)
-                if restart:
-                    _log_runtime_safe(
-                        "info",
-                        "switch deferred restart scheduled",
-                        {"name": name, "preferred_restart_app": preferred_restart_app, "preferred_restart_exec": preferred_restart_exec},
-                    )
+                    message = next((line.removeprefix("error: ").strip() for line in reversed((out + "\n" + err).splitlines()) if line.startswith("error:")), "Account switch failed. Check the error details and retry.")
+                    return _json_error("CONFLICT" if rc == 409 else "SWITCH_FAILED", message, 409 if rc == 409 else 400, payload)
                 push_event("switch-manual", f"manually switched to '{name}'")
                 return _json_ok(payload)
             if self.command == "POST" and path == "/api/ui-config":
@@ -5433,7 +5032,6 @@ def cmd_ui_serve(host: str, port: int, no_open: bool, interval_sec: float, idle_
                     target=target,
                     restart_codex=True,
                     source="auto-switch-run-once",
-                    schedule_deferred_restart=False,
                 )
                 payload = _command_result("auto_switch.run_once", rc, out, err)
                 if rc != 0:
@@ -5455,7 +5053,6 @@ def cmd_ui_serve(host: str, port: int, no_open: bool, interval_sec: float, idle_
                     target=target,
                     restart_codex=True,
                     source="auto-switch-run-switch",
-                    schedule_deferred_restart=False,
                 )
                 payload = _command_result("auto_switch.run_switch", rc, out, err)
                 if rc != 0:

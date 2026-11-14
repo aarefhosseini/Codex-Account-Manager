@@ -100,64 +100,17 @@ class CliCoreTests(unittest.TestCase):
         self.assertEqual(command[1], "ui")
         self.assertNotIn("cli.py", " ".join(command))
 
-    def test_platform_process_candidates_on_macos_are_strict(self):
-        with mock.patch("sys.platform", "darwin"):
-            candidates = cli._platform_process_candidates()
-        self.assertEqual(
-            candidates["Codex"],
-            ["/Applications/Codex.app/Contents/MacOS/Codex"],
-        )
-        self.assertEqual(
-            candidates["CodexBar"],
-            ["/Applications/CodexBar.app/Contents/MacOS/CodexBar"],
-        )
+    @mock.patch("codex_account_manager.cli._desktop_apps")
+    @mock.patch("codex_account_manager.desktop.process_snapshot")
+    def test_detect_running_app_name_uses_actual_desktop_path(self, snapshot, apps):
+        from codex_account_manager.desktop import DesktopApp
+        apps.return_value = [DesktopApp("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", "/Applications/ChatGPT.app")]
+        snapshot.return_value = [{"pid": 12, "ppid": 1, "executable": apps.return_value[0].executable}]
+        self.assertEqual(cli.detect_running_app_name(), "ChatGPT")
 
-    def test_platform_process_candidates_on_linux_use_cli_names(self):
-        with mock.patch("sys.platform", "linux"):
-            candidates = cli._platform_process_candidates()
-        self.assertEqual(candidates["Codex"], ["codex"])
-        self.assertEqual(candidates["CodexBar"], ["codexbar"])
-
-    @mock.patch("codex_account_manager.cli._proc_running")
-    def test_detect_running_app_name_on_macos_uses_strict_process_paths(self, mock_proc_running):
-        mock_proc_running.side_effect = [False, True]
-
-        with mock.patch("sys.platform", "darwin"):
-            app_name = cli.detect_running_app_name()
-
-        self.assertEqual(app_name, "CodexBar")
-
-    @mock.patch("codex_account_manager.cli._subprocess_run")
-    def test_start_codex_on_macos_uses_exact_app_bundle_path(self, mock_run):
-        mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
-
-        with mock.patch("sys.platform", "darwin"):
-            started = cli.start_codex(preferred_app_name="Codex")
-
-        self.assertTrue(started)
-        self.assertEqual(
-            mock_run.call_args.args[0],
-            ["open", "/Applications/Codex.app"],
-        )
-
-    @mock.patch("codex_account_manager.cli.time.sleep")
-    @mock.patch("codex_account_manager.cli.codex_running", return_value=False)
-    @mock.patch("codex_account_manager.cli._subprocess_run")
-    def test_stop_codex_on_macos_quits_exact_app_bundle_paths(self, mock_run, _mock_running, _mock_sleep):
-        mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
-
-        with mock.patch("sys.platform", "darwin"):
-            stopped = cli.stop_codex()
-
-        self.assertTrue(stopped)
-        self.assertEqual(
-            mock_run.call_args_list[0].args[0],
-            ["osascript", "-e", 'tell application (POSIX file "/Applications/Codex.app" as alias) to quit'],
-        )
-        self.assertEqual(
-            mock_run.call_args_list[1].args[0],
-            ["osascript", "-e", 'tell application (POSIX file "/Applications/CodexBar.app" as alias) to quit'],
-        )
+    @mock.patch("codex_account_manager.cli._desktop_apps", return_value=[])
+    def test_start_codex_does_not_fall_back_to_cli(self, _apps):
+        self.assertFalse(cli.start_codex())
 
     @mock.patch("codex_account_manager.cli._ui_service_command_base")
     def test_build_ui_service_restart_command_reuses_runtime_base(self, mock_base):
@@ -272,8 +225,9 @@ class CliCoreTests(unittest.TestCase):
         self.assertEqual(payload["python"]["version"], "3.11.9")
         self.assertEqual(payload["core"]["version"], "0.0.20")
 
+    @mock.patch("codex_account_manager.cli._internet_available_for_npm", return_value=True)
     @mock.patch("codex_account_manager.cli._subprocess_run")
-    def test_cmd_electron_runs_npm_install_then_dev_when_deps_missing(self, mock_run):
+    def test_cmd_electron_runs_npm_install_then_dev_when_deps_missing(self, mock_run, _internet):
         mock_run.return_value = mock.Mock(returncode=0)
         electron_dir = self.tmp.name and Path(self.tmp.name) / "electron"
         electron_dir.mkdir()
@@ -299,8 +253,9 @@ class CliCoreTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertEqual(mock_run.call_args_list, [])
 
+    @mock.patch("codex_account_manager.cli._internet_available_for_npm", return_value=True)
     @mock.patch("codex_account_manager.cli._subprocess_run")
-    def test_cmd_electron_installs_when_renderer_deps_are_missing(self, mock_run):
+    def test_cmd_electron_installs_when_renderer_deps_are_missing(self, mock_run, _internet):
         mock_run.return_value = mock.Mock(returncode=0)
         electron_dir = Path(self.tmp.name) / "electron"
         electron_dir.mkdir()

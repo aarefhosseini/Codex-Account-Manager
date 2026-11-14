@@ -1098,6 +1098,7 @@ body.column-resize-active * {
 }
 
 .progress-fill {
+  display: block;
   height: 100%;
   width: 0;
   background: var(--color-green);
@@ -4978,3 +4979,18 @@ body:not(.size-compact) .about-view .about-card-stack {
 body.size-compact .about-details-grid {
   grid-template-columns: minmax(0, 1fr);
 }
+
+/* Action feedback stays above dialogs and remains dismissible. */
+.toast { position: relative; padding-inline-end: 38px; }
+.toast.error { border-color: var(--color-red); }
+.toast-close { position: absolute; inset-inline-end: 8px; top: 8px; border: 0; background: none; color: var(--text-secondary); cursor: pointer; font-size: 20px; }
+.workspace-error { position: fixed; inset-inline: 16px; top: 72px; bottom: auto; z-index: var(--z-toast, 1000); margin: 0; max-height: 25vh; overflow: auto; }
+.switch-status { position: fixed; inset-inline: 24px; bottom: 24px; z-index: var(--z-toast, 1000); display: grid; gap: 8px; padding: 16px 20px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--bg-elevated); box-shadow: var(--shadow-lg); }
+.switch-status span { color: var(--text-secondary); font-size: var(--text-sm); }
+.subscription-status { font-size: var(--text-xs); }
+.subscription-status.expired { color: var(--color-red); }
+.subscription-status.active { color: var(--color-green); }
+
+.continue-work-option { display: flex; align-items: center; gap: 8px; padding: 10px var(--layout-content-padding-x); color: var(--text-secondary); font-size: var(--text-sm); }
+
+.subscription-period { display: grid; gap: 3px; padding-block: 4px; }

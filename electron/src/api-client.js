@@ -7,6 +7,10 @@ const EXTENDED_REQUEST_TIMEOUT_MS = 30000;
 const EXTENDED_TIMEOUT_PATHS = new Set([
   "/api/auto-switch/chain",
 ]);
+const SWITCH_TIMEOUT_PATHS = new Set([
+  "/api/local/switch", "/api/switch", "/api/auto-switch/run-switch",
+  "/api/auto-switch/run-once", "/api/adv/switch",
+]);
 
 function joinUrl(baseUrl, path) {
   return `${String(baseUrl || "").replace(/\/+$/, "")}${path}`;
@@ -63,6 +67,7 @@ function resolveRequestTimeoutMs(path, options = {}, state = {}) {
     return Math.max(1000, Number(options.timeoutMs || DEFAULT_REQUEST_TIMEOUT_MS));
   }
   const baseTimeout = Math.max(1000, Number(state?.requestTimeoutMs || DEFAULT_REQUEST_TIMEOUT_MS));
+  if (SWITCH_TIMEOUT_PATHS.has(String(path || "").split("?")[0])) return Math.max(baseTimeout, 90000);
   if (EXTENDED_TIMEOUT_PATHS.has(String(path || ""))) {
     return Math.max(baseTimeout, EXTENDED_REQUEST_TIMEOUT_MS);
   }
@@ -121,12 +126,26 @@ function createApiClient({ state, fetchImpl = fetch }) {
       });
       const payload = await response.json();
       if (!response.ok || payload?.ok === false) {
-        throw new Error(payload?.error?.message || `request failed: ${response.status}`);
+        const details = payload?.error?.details || payload?.error?.data || {};
+        const commandError = String(details.stderr || details.stdout || "").split("\n").find((line) => line.startsWith("error:"));
+        const error = new Error(commandError?.replace(/^error:\s*/, "") || payload?.error?.message || `Request failed (${response.status}).`);
+        error.code = payload?.error?.code;
+        throw error;
       }
-      return unwrapApiPayload(payload);
+      const data = unwrapApiPayload(payload);
+      if (typeof data?.exit_code === "number" && data.exit_code !== 0) {
+        const message = String(data.stderr || data.stdout || "").split("\n").find((line) => line.startsWith("error:"));
+        throw new Error(message?.replace(/^error:\s*/, "") || "The operation failed. Open Debug for details and retry.");
+      }
+      return data;
     } catch (error) {
       if (controller && error?.name === "AbortError") {
-        throw new Error(`request timeout after ${timeoutMs}ms: ${path}`);
+        throw new Error(SWITCH_TIMEOUT_PATHS.has(path)
+          ? "Account switch timed out. It may still be finishing; wait and refresh the account list before retrying."
+          : `Request timeout after ${timeoutMs}ms: ${path}. Check the local service and retry.`);
+      }
+      if (error instanceof TypeError && /fetch|network/i.test(error.message)) {
+        throw new Error("Cannot reach the local account service. Restart the service from Settings and retry.");
       }
       throw error;
     } finally {
@@ -186,21 +205,27 @@ function createApiClient({ state, fetchImpl = fetch }) {
     const platform = String(options?.platform || process.platform || "").toLowerCase();
     const targetNoRestart = Object.prototype.hasOwnProperty.call(options || {}, "noRestart")
       ? Boolean(options.noRestart)
-      : (platform === "darwin" ? false : true);
+      : false;
     const payload = {
       name,
       no_restart: targetNoRestart,
     };
+    if (Object.prototype.hasOwnProperty.call(options, "continueWork")) payload.continue_work = Boolean(options.continueWork);
     if (Boolean(options?.closeOnly)) {
       payload.close_only = true;
       payload.no_restart = true;
     }
     await request("/api/local/switch", {
+      timeoutMs: 90000,
       method: "POST",
       headers: buildApiHeaders(state),
       body: JSON.stringify(payload),
     });
-    return getDesktopState({ usageScope: "all", usageTimeoutSec: 8, usageForce: true });
+    // Usage is refreshed separately. A quota/network outage must not turn a
+    // completed switch into a failed button action.
+    const snapshot = await getDesktopState();
+    const { applyProfileSelection } = await import("./renderer/parity.mjs");
+    return applyProfileSelection(snapshot, name);
   }
 
   async function saveConfigPatch(patch) {

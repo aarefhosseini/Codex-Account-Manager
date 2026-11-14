@@ -1,6 +1,7 @@
 "use strict";
 
 function toPercent(value) {
+  if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   if (!Number.isFinite(n)) {
     return null;
@@ -26,7 +27,7 @@ function buildUsageSummary(payload) {
   const fiveHourPercent = toPercent(row?.usage_5h?.remaining_percent);
   const weeklyPercent = toPercent(row?.usage_weekly?.remaining_percent);
 
-  if (!row || !profileName || fiveHourPercent === null || weeklyPercent === null) {
+  if (!row || row.error || !profileName || fiveHourPercent === null || weeklyPercent === null) {
     return {
       available: false,
       profileName: "",

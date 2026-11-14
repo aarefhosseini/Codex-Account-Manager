@@ -72,7 +72,7 @@ test("switchProfile sends no_restart true when explicitly requested and refreshe
     [
       "http://127.0.0.1:4673/api/current",
       "http://127.0.0.1:4673/api/list",
-      "http://127.0.0.1:4673/api/usage-local?timeout=8&force=true",
+      "http://127.0.0.1:4673/api/usage-local/current?timeout=7",
       "http://127.0.0.1:4673/api/ui-config",
       "http://127.0.0.1:4673/api/auto-switch/state",
     ],
@@ -272,4 +272,32 @@ test("auto-switch chain uses an extended default timeout", () => {
   assert.equal(resolveRequestTimeoutMs("/api/current", {}, {}), 12000);
   assert.equal(resolveRequestTimeoutMs("/api/auto-switch/chain", {}, {}), 30000);
   assert.equal(resolveRequestTimeoutMs("/api/auto-switch/chain", { timeoutMs: 9000 }, {}), 9000);
+  assert.equal(resolveRequestTimeoutMs("/api/auto-switch/run-switch", {}, {}), 90000);
+  assert.equal(resolveRequestTimeoutMs("/api/local/switch", {}, {}), 90000);
+});
+
+
+test("Windows switch restarts Codex and requests continuation when enabled", async () => {
+  const bodies = [];
+  const client = createApiClient({
+    state: { baseUrl: "http://localhost" },
+    fetchImpl: async (url, options = {}) => {
+      if (options.body) bodies.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ ok: true, data: {} }) };
+    },
+  });
+  const result = await client.switchProfile("work", { platform: "win32", continueWork: true });
+  assert.deepEqual(bodies[0], { name: "work", no_restart: false, continue_work: true });
+  assert.equal(result.usage.current_profile, "work");
+});
+
+test("command errors preserve the actionable backend failure", async () => {
+  const client = createApiClient({
+    state: { baseUrl: "http://localhost" },
+    fetchImpl: async () => ({ ok: false, status: 400, json: async () => ({ ok: false, error: {
+      code: "COMMAND_FAILED", message: "local switch failed",
+      details: { stdout: "Closing Codex...\\nerror: Codex is still running. Close it and retry.".replace(/\\n/g, "\n") },
+    } }) }),
+  });
+  await assert.rejects(client.switchProfile("work"), /Codex is still running/);
 });

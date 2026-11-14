@@ -2,6 +2,7 @@
 
 const INVALIDATING_POST_PATHS = new Set([
   "/api/local/save",
+  "/api/local/subscription",
   "/api/local/add",
   "/api/local/import/apply",
   "/api/local/remove",
