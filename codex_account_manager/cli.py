@@ -34,7 +34,7 @@ from urllib.parse import parse_qs, quote, urlparse
 try:
     from .contracts import CommandResult
     from . import native_notifications, desktop, continuation
-    from .subscriptions import purchase_date, subscription_info
+    from .subscriptions import lookup_profile_billing, purchase_date, subscription_info
     from .services import DiagnosticsLogger, UiConfigService, UsageService
 except Exception:
     # Support direct script execution (python path/to/cli.py ...)
@@ -42,7 +42,7 @@ except Exception:
     import native_notifications  # type: ignore
     import desktop  # type: ignore
     import continuation  # type: ignore
-    from subscriptions import purchase_date, subscription_info  # type: ignore
+    from subscriptions import lookup_profile_billing, purchase_date, subscription_info  # type: ignore
     from services import DiagnosticsLogger, UiConfigService, UsageService  # type: ignore
 
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
@@ -4726,6 +4726,8 @@ def cmd_ui_serve(host: str, port: int, no_open: bool, interval_sec: float, idle_
                 if not payload:
                     return _json_error("NOT_FOUND", "session not found", 404)
                 return _json_ok(payload)
+            if self.command == "POST" and path == "/api/local/subscriptions/lookup":
+                return _json_ok({"profiles": lookup_profile_billing(_existing_profile_dirs())})
             if self.command == "POST" and path == "/api/local/subscription":
                 try:
                     name = str(body.get("name") or "").strip()
