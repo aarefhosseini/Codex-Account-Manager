@@ -38,6 +38,8 @@ class BillingPeriodTests(unittest.TestCase):
             ({"renews_at": "2026-11-28"}, {}, None),
             ({"renews_at": "2026-11-14T00:00:00Z"}, {}, None),
             ({"is_delinquent": True}, {"will_renew": False}, {"status": "payment_issue"}),
+            ({"is_delinquent": True, "renews_at": "2026-11-14T00:00:00Z"},
+             {"will_renew": False}, {"status": "renewal_passed"}),
             ({"cancels_at": "2026-11-28T00:00:00Z"}, {"will_renew": False},
              {"status": "ends", "at": "2026-11-28T00:00:00+00:00"}),
             ({}, {"will_renew": False}, None),

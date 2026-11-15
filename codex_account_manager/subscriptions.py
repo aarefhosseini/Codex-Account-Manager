@@ -17,13 +17,13 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def _future_timestamp(value, now: dt.datetime) -> str | None:
+def _billing_timestamp(value) -> dt.datetime | None:
     if not isinstance(value, str):
         return None
     try:
         timestamp = dt.datetime.fromisoformat(value)
-        if timestamp.tzinfo is not None and timestamp > now:
-            return timestamp.astimezone(dt.timezone.utc).isoformat()
+        if timestamp.tzinfo is not None:
+            return timestamp.astimezone(dt.timezone.utc)
     except (ValueError, OverflowError):
         pass
     return None
@@ -41,20 +41,24 @@ def parse_billing_period(payload, account_id: str, now: dt.datetime | None = Non
         return None
     if not isinstance(entitlement, dict) or entitlement.get("subscription_plan") != "chatgptplusplan":
         return None
+    now = now or dt.datetime.now(dt.timezone.utc)
+    renews_at = _billing_timestamp(entitlement.get("renews_at"))
     if entitlement.get("is_delinquent") is True:
+        if renews_at and renews_at <= now:
+            return {"status": "renewal_passed"}
         return {"status": "payment_issue"}
     if entitlement.get("has_active_subscription") is not True or entitlement.get("is_delinquent") is not False:
         return None
 
-    now = now or dt.datetime.now(dt.timezone.utc)
     last_subscription = record.get("last_active_subscription")
     will_renew = last_subscription.get("will_renew") if isinstance(last_subscription, dict) else None
     if will_renew is False:
-        ends_at = _future_timestamp(entitlement.get("cancels_at"), now)
-        return {"status": "ends", "at": ends_at} if ends_at else None
+        ends_at = _billing_timestamp(entitlement.get("cancels_at"))
+        if ends_at and ends_at > now:
+            return {"status": "ends", "at": ends_at.isoformat()}
     if will_renew is True and "cancels_at" in entitlement and entitlement["cancels_at"] is None:
-        renews_at = _future_timestamp(entitlement.get("renews_at"), now)
-        return {"status": "renews", "at": renews_at} if renews_at else None
+        if renews_at and renews_at > now:
+            return {"status": "renews", "at": renews_at.isoformat()}
     return None
 
 

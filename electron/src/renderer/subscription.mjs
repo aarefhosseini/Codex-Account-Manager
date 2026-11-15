@@ -1,12 +1,17 @@
+const dateFormatter = new Intl.DateTimeFormat("fa-IR-u-nu-latn");
+
 export function formatSubscriptionDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return "Not set";
   const date = new Date(`${value}T12:00:00`);
-  return Number.isFinite(date.getTime()) ? date.toLocaleDateString("fa-IR") : "Not set";
+  return Number.isFinite(date.getTime()) ? dateFormatter.format(date) : "Not set";
 }
 
 export function subscriptionDisplay(subscription, billing) {
+  if (billing?.status === "renewal_passed") {
+    return { label: "Renewal date passed", status: "expired", needsAttention: true };
+  }
   if (billing?.status === "payment_issue") {
-    return { label: "Payment issue", status: "expired", needsAttention: true };
+    return { label: "Renewal date unavailable", status: "unknown" };
   }
   const timestamp = Date.parse(billing?.at);
   const remaining = timestamp - Date.now();
@@ -14,7 +19,7 @@ export function subscriptionDisplay(subscription, billing) {
     const prefix = billing.status === "renews" ? "Renews" : "Ends";
     const days = Math.ceil(remaining / 86400000);
     return {
-      label: `${prefix} ${new Date(timestamp).toLocaleDateString("fa-IR")}`,
+      label: `${prefix} ${dateFormatter.format(timestamp)}`,
       detail: `${days} ${days === 1 ? "day" : "days"} left`,
       title: new Date(timestamp).toLocaleString(),
       at: billing.at,
