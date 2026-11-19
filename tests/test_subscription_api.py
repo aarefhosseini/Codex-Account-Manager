@@ -1,5 +1,7 @@
 """Local HTTP contract tests, with an isolated CODEX_HOME and fake credentials."""
 
+import copy
+import datetime as dt
 import json
 import os
 import socket
@@ -11,6 +13,46 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from codex_account_manager.subscriptions import parse_billing_period
+
+
+class BillingPeriodTests(unittest.TestCase):
+    def test_selected_plus_account_and_billing_states(self):
+        now = dt.datetime(2026, 11, 15, tzinfo=dt.timezone.utc)
+        record = {
+            "account": {"account_id": "selected"},
+            "entitlement": {
+                "subscription_plan": "chatgptplusplan",
+                "has_active_subscription": True,
+                "is_delinquent": False,
+                "renews_at": "2026-11-28T00:00:00Z",
+                "expires_at": "2026-11-29T00:00:00Z",
+                "cancels_at": None,
+            },
+            "last_active_subscription": {"will_renew": True},
+        }
+        self.assertIsNone(parse_billing_period({"accounts": {"default": record}}, "selected", now))
+        cases = [
+            ({}, {}, {"status": "renews", "at": "2026-11-28T00:00:00+00:00"}),
+            ({"renews_at": "2026-11-28"}, {}, None),
+            ({"renews_at": "2026-11-14T00:00:00Z"}, {}, None),
+            ({"is_delinquent": True}, {"will_renew": False}, {"status": "payment_issue"}),
+            ({"is_delinquent": True, "renews_at": "2026-11-14T00:00:00Z"},
+             {"will_renew": False}, {"status": "renewal_passed"}),
+            ({"cancels_at": "2026-11-28T00:00:00Z"}, {"will_renew": False},
+             {"status": "ends", "at": "2026-11-28T00:00:00+00:00"}),
+            ({}, {"will_renew": False}, None),
+        ]
+        for entitlement, last_subscription, expected in cases:
+            with self.subTest(entitlement=entitlement, last_subscription=last_subscription):
+                selected = copy.deepcopy(record)
+                selected["entitlement"].update(entitlement)
+                selected["last_active_subscription"].update(last_subscription)
+                payload = {"accounts": {"selected": selected}}
+                self.assertEqual(parse_billing_period(payload, "selected", now), expected)
+                selected["account"]["account_id"] = "another"
+                self.assertIsNone(parse_billing_period(payload, "selected", now))
 
 
 class SubscriptionApiTests(unittest.TestCase):
@@ -56,6 +98,10 @@ class SubscriptionApiTests(unittest.TestCase):
                     error.exception.close()
                 with self.assertRaises(urllib.error.HTTPError) as error:
                     request("/api/local/subscription", {"name": "work", "purchased_at": None}, token=False)
+                self.assertEqual(error.exception.code, 403)
+                error.exception.close()
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    request("/api/local/subscriptions/lookup", {}, token=False)
                 self.assertEqual(error.exception.code, 403)
                 error.exception.close()
                 cleared = request("/api/local/subscription", {"name": "work", "purchased_at": None})

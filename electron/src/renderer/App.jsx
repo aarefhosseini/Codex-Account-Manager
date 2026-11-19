@@ -82,7 +82,7 @@ import ToggleSwitch from "./components/ToggleSwitch.jsx";
 import ProfilesOverview from "./components/ProfilesOverview.jsx";
 import { filterProfiles, profileIsReady, profileNeedsAttention } from "./profile-filters.mjs";
 import { ToastProvider, useToast } from "./components/ToastProvider.jsx";
-import { formatSubscriptionDate, subscriptionSummary } from "./subscription.mjs";
+import { formatSubscriptionDate, subscriptionDisplay, subscriptionSummary } from "./subscription.mjs";
 
 function NavIcon({ id }) {
   switch (id) {
@@ -493,7 +493,7 @@ function sortRows(rows, sort) {
       case "purchased":
         return String(row.subscription?.purchased_at || "");
       case "expires":
-        return String(row.subscription?.expires_at || "");
+        return subscriptionDisplay(row.subscription, row.billing).at || "";
       case "plan":
         return String(row.plan_type || "");
       case "h5remain":
@@ -1404,14 +1404,13 @@ function AccountsTable({
             return <span className="muted id-value" title={profile.account_id || "-"}>{truncateAccountId(profile.account_id)}</span>;
           case "purchased":
             return <span className="muted" title={profile.subscription?.purchased_at || "Purchase date not set"}>{formatSubscriptionDate(profile.subscription?.purchased_at)}</span>;
-          case "expires":
-            return <span className={`subscription-status subscription-period ${profile.subscription?.status || "unknown"}`} title={profile.subscription?.expires_at || "Set purchase date from account details"}>
-              {profile.subscription?.purchased_at ? <>
-                <span className="muted">Bought: {formatSubscriptionDate(profile.subscription.purchased_at)}</span>
-                <span>Ends: {formatSubscriptionDate(profile.subscription.expires_at)}</span>
-                <span>{profile.subscription.status === "expired" ? "Period ended" : `${profile.subscription.days_remaining} days left`}</span>
-              </> : "Purchase date not set"}
+          case "expires": {
+            const period = subscriptionDisplay(profile.subscription, profile.billing);
+            return <span className={`subscription-status subscription-period ${period.status}`} title={period.title}>
+              <span>{period.label}</span>
+              {period.detail && <span>{period.detail}</span>}
             </span>;
+          }
           case "added":
             return <span className="muted" title={fmtSavedAtFull(profile.saved_at)}>{fmtSavedAt(profile.saved_at)}</span>;
           case "note":
@@ -1549,7 +1548,7 @@ function AccountsMobileList({ profiles, switching, onSwitch, onOpenRowActions, o
               <div className="mobile-left">
                 <StatusDot active={profile.is_current} />
                 <span className="mobile-profile">{profile.name || "-"}</span>
-                <span className="subscription-status" title={profile.subscription?.purchased_at || "Purchase date not set"}>{subscriptionSummary(profile.subscription)}</span>
+                <span className="subscription-status">{subscriptionSummary(profile.subscription, profile.billing)}</span>
               </div>
               <div className="mobile-actions">
                 <Button
@@ -1610,10 +1609,39 @@ function ProfilesView({
   shouldFlashUsageFn,
   continueWork,
   onContinueWorkChange,
+  billingRefresh,
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
-  const sortedProfiles = sortRows(buildProfileRows(state), sort);
+  const [billingRows, setBillingRows] = useState([]);
+  const rows = buildProfileRows(state);
+  const profileKey = rows.length ? JSON.stringify(rows.map(({ name, account_id }) => [name, account_id])) : "";
+  useEffect(() => {
+    if (!profileKey) return;
+    let ignore = false;
+    let timer;
+    async function lookup() {
+      try {
+        const result = await window.codexAccountDesktop.request("/api/local/subscriptions/lookup", {
+          method: "POST", timeoutMs: 30000,
+        });
+        if (!ignore) setBillingRows(Array.isArray(result?.profiles) ? result.profiles : []);
+      } catch {
+        if (!ignore) setBillingRows([]);
+      }
+      if (!ignore) timer = window.setTimeout(lookup, 10 * 60 * 1000);
+    }
+    lookup();
+    return () => {
+      ignore = true;
+      window.clearTimeout(timer);
+    };
+  }, [profileKey, billingRefresh]);
+  const billingByName = new Map(billingRows.map((row) => [row.name, row]));
+  const sortedProfiles = sortRows(rows.map((row) => {
+    const billing = billingByName.get(row.name);
+    return billing?.account_id === row.account_id ? { ...row, billing } : row;
+  }), sort);
   const allProfiles = sortedProfiles;
   const profiles = filterProfiles(allProfiles, query, filter);
   const activeColumnCount = columnDefs.filter((column) => visibleColumns?.[column.key] && isColumnVisibleForViewport(column.key, viewportSizeClass)).length;
@@ -2799,6 +2827,7 @@ function AppContent() {
   const desktop = window.codexAccountDesktop;
   const isMacDesktop = String(desktop?.platform || "").toLowerCase() === "darwin";
   const [activeView, setActiveView] = useState("profiles");
+  const [billingRefresh, setBillingRefresh] = useState(0);
   const [viewportSizeClass, setViewportSizeClass] = useState(() => classifyWidth(window.innerWidth));
   const [sidebarMode, setSidebarMode] = useState("fixed");
   const [state, setState] = useState(null);
@@ -4613,12 +4642,16 @@ function AppContent() {
           loading={loading}
           themeMode={state?.config?.ui?.theme}
           onCycleTheme={cycleThemeMode}
-          onRefresh={refreshState}
+          onRefresh={() => {
+            setBillingRefresh((revision) => revision + 1);
+            return refreshState();
+          }}
           onRestart={restartUiService}
         />
         {activeView === "profiles" && (
           <ProfilesView
             state={state}
+            billingRefresh={billingRefresh}
             switching={switching || (state?.autoSwitch?.switch_in_flight ? state.autoSwitch.switch_target : "")}
             activatedProfile={activatedProfile}
             switchMotion={switchMotion}
@@ -5092,8 +5125,7 @@ function AppContent() {
                   <LabelValueRow label="Account ID" value={formatAccountDetailValue(profile.account_id)} />
                   <LabelValueRow label="Added" value={formatAccountDetailValue(fmtSavedAtFull(profile.saved_at))} />
                   <LabelValueRow label="Purchased" value={formatSubscriptionDate(profile.subscription?.purchased_at)} />
-                  <LabelValueRow label="Estimated Plus end (30 days)" value={formatSubscriptionDate(profile.subscription?.expires_at)} />
-                  <LabelValueRow label="Time left" value={subscriptionSummary(profile.subscription)} />
+                  <LabelValueRow label="Plus period" value={subscriptionSummary(profile.subscription, profile.billing)} />
                   <LabelValueRow label="Note" value={formatAccountDetailValue(profile.note)} />
                 </section>
 

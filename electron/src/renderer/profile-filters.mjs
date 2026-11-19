@@ -1,3 +1,5 @@
+import { subscriptionDisplay } from "./subscription.mjs";
+
 function remainingQuota(usage) {
   const value = usage?.remaining_percent;
   if (value === null || value === undefined || value === "") return null;
@@ -7,8 +9,7 @@ function remainingQuota(usage) {
 
 export function profileNeedsAttention(profile) {
   return Boolean(profile.error)
-    || profile.subscription?.status === "expired"
-    || (Number.isFinite(profile.subscription?.days_remaining) && profile.subscription.days_remaining <= 3)
+    || subscriptionDisplay(profile.subscription, profile.billing).needsAttention === true
     || [profile.usage_5h, profile.usage_weekly].map(remainingQuota).some((value) => value !== null && value <= 0);
 }
 
