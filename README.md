@@ -8,7 +8,7 @@ Codex Account Manager is a desktop app for people who use more than one Codex ac
 
 ## Install
 
-The release builds for v0.1.0 target Apple Silicon Macs and 64-bit Windows PCs. The packaged app includes its Python core. Install Codex Desktop separately for desktop switching, and make the Codex CLI available for account login and other CLI operations. Linux users can build from source or use the CLI and local browser panel.
+The desktop builds target Apple Silicon Macs and 64-bit Windows PCs. The packaged app includes its Python core. Install Codex Desktop separately for desktop switching, and make the Codex CLI available for account login and other CLI operations. Linux users can build from source or use the CLI and local browser panel.
 
 | Platform | Package | Installation |
 | --- | --- | --- |
@@ -16,7 +16,7 @@ The release builds for v0.1.0 target Apple Silicon Macs and 64-bit Windows PCs. 
 | Windows (x64) | `.exe` | Run the installer and launch Codex Account Manager from the Start menu. |
 | Linux | Source | Follow the development instructions below. |
 
-Select the package for your computer on the [v0.1.0 release page](https://github.com/aarefhosseini/Codex-Account-Manager/releases/tag/v0.1.0). The release notes list the available files and their SHA-256 checksums. These community builds use ad hoc signing on macOS and are unsigned on Windows.
+Select the package for your computer on the [v0.1.2 release page](https://github.com/aarefhosseini/Codex-Account-Manager/releases/tag/v0.1.2). The release notes list the available files and their SHA-256 checksums. These community builds use ad hoc signing on macOS and are unsigned on Windows.
 
 ## Save and manage accounts
 
@@ -28,9 +28,9 @@ Select the package for your computer on the [v0.1.0 release page](https://github
 
 ## Switch accounts and continue a chat
 
-Click **Switch** on the target profile. Account Manager finds the installed Codex Desktop app, requests shutdown, and checks that the app and its helpers have exited. It saves a private backup, replaces and verifies the active credentials, then reopens Codex. If shutdown fails, the app reports the cause before changing the account. If relaunch fails after the account changes, it tells you which step failed.
+Click **Switch** on the target profile. Account Manager finds the installed Codex Desktop app, requests shutdown, and checks that the app and its helpers have exited. It saves a private backup, replaces and verifies the active credentials, then reopens Codex. If shutdown fails, the app reports the cause before changing the account. If the selected sign-in cannot be verified, the previous credentials are restored. If relaunch fails after verification, the app tells you which step failed.
 
-With **Continue work after switching** enabled, Account Manager opens the last identifiable local chat and queues a single instruction to continue unfinished work using `codex queue --resume`. This needs a compatible Codex CLI and local daemon. The app checks its bundled Codex CLI first, then the CLI on your PATH. The previous chat must remain accessible under the selected account. A queued command confirms delivery to Codex. The agent still needs available quota and any approvals required by that chat.
+With **Continue work after switching** enabled, Account Manager opens the last identifiable local chat and queues a single instruction to continue unfinished work using `codex queue --resume`. This needs a compatible Codex CLI and local daemon. The app checks the Codex Desktop bundle for a compatible CLI, then falls back to the system CLI. If the previous chat or a compatible CLI is unavailable, the switch still completes and the app explains why continuation was skipped. The previous chat must remain accessible under the selected account. A queued command confirms delivery to Codex. The agent still needs available quota and any approvals required by that chat.
 
 Turn off the continuation toggle to switch without sending a message. A delivery timeout can leave the result unknown. Check the chat before submitting another instruction. For a custom Codex Desktop installation, see [configuration and storage](docs/config-and-storage.md).
 
@@ -49,7 +49,7 @@ The desktop app includes light, dark, and system themes, keyboard navigation, re
 Install the CLI from a checkout or pin it to a release. Python 3.11 or newer is required for the standalone CLI.
 
 ```sh
-pipx install 'git+https://github.com/aarefhosseini/Codex-Account-Manager.git@v0.1.0'
+pipx install 'git+https://github.com/aarefhosseini/Codex-Account-Manager.git@v0.1.2'
 codex-account --help
 codex-account save work
 codex-account add personal --device-auth

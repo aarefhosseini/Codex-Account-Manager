@@ -41,7 +41,6 @@ test("update view source uses a unified update progress dialog and desktop updat
   assert.match(source, /desktop\.runUnifiedUpdate/);
   assert.match(source, /desktop\.onUpdateProgress/);
   assert.match(source, /update-status-summary/);
-  assert.match(source, /update-source-row/);
   assert.match(source, /update-source-pill/);
   assert.match(source, /update-layer-item/);
   assert.match(source, /update-layer-item-label/);

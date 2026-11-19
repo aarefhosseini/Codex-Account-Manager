@@ -17,17 +17,17 @@ Existing accounts remain **Purchase date not set** until edited. Adding an accou
 The desktop Switch button now waits for one complete operation:
 
 1. Find the desktop application and capture the current owner's last locally recorded chat interaction.
-2. Check continuation support before changing anything when **Continue unfinished work** is enabled.
+2. Check whether the previous chat can be resumed when **Continue unfinished work** is enabled.
 3. Quit the application, wait for its process tree, and terminate surviving helpers if necessary. An inspection or shutdown failure stops the switch before credentials change.
 4. Preserve the outgoing account's refreshed credentials, write a private backup, replace auth atomically, and verify the selected identity.
 5. Reopen the desktop application with the previous local chat's [documented deep link](https://learn.chatgpt.com/docs/reference/commands#chats).
 6. Use [`codex queue --resume`](https://learn.chatgpt.com/docs/developer-commands#codex-queue) to send one continuation message to that exact chat. It asks the agent to inspect current progress, continue unfinished work, and preserve existing approval requirements.
 
-The bundled Codex CLI is checked before the system CLI. Older CLIs without `queue --resume` produce an actionable error before the account changes. Turn off **Continue unfinished work** to switch and reopen without sending a message. This preference is saved locally. Opening the link or accepting the queued message does not prove a new model turn has finished; an unavailable daemon or failed resume is reported explicitly. An ambiguous delivery timeout is never retried automatically.
+The bundled Codex CLI is checked before the system CLI. Missing chat history and older CLIs without `queue --resume` produce a separate warning after a successful switch. Turn off **Continue unfinished work** to switch and reopen without sending a message. This preference is saved locally. Opening the link or accepting the queued message does not prove a new model turn has finished; an unavailable daemon or failed resume is reported explicitly. An ambiguous delivery timeout is never retried automatically.
 
 On macOS, discovery checks the `com.openai.codex` bundle identity, including installations named `ChatGPT.app`. The unrelated ChatGPT client and Codex Account Manager are not matched by name. For a custom installation, set `codex.app_path_macos`, `codex.app_path_windows`, or `codex.app_path_linux` in the project `config.json`.
 
-If writing credentials fails, the previous auth data is restored. If reopening or continuation fails after credentials change, the error states that the account already changed. Refresh the list before retrying. The switch stays locked through relaunch and continuation delivery.
+If writing or verifying credentials fails, the previous auth state is restored and the target profile remains available to retry. If reopening fails after verification, the error states that the account already changed. The switch stays locked through relaunch and continuation delivery.
 
 ## Feedback and checks
 

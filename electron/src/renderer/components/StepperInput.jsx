@@ -12,6 +12,7 @@ function StepperInput({
   unit = "",
   onChange,
   className = "",
+  ariaLabel,
 }) {
   const [draft, setDraft] = useState(String(value ?? min));
   const [limitHit, setLimitHit] = useState(false);
@@ -63,18 +64,19 @@ function StepperInput({
   return (
     <div className="inline-stepper-field">
       <div className={classes}>
-        <button type="button" onClick={() => handleAdjust(-step)} aria-label="Decrease value">-</button>
+        <button type="button" onClick={() => handleAdjust(-step)} aria-label={ariaLabel ? `Decrease ${ariaLabel.toLowerCase()}` : "Decrease value"}>-</button>
         <input
           type="number"
           value={draft}
           min={min}
           max={max}
           step={step}
+          aria-label={ariaLabel}
           aria-invalid={invalid}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={() => commit(draft)}
         />
-        <button type="button" onClick={() => handleAdjust(step)} aria-label="Increase value">+</button>
+        <button type="button" onClick={() => handleAdjust(step)} aria-label={ariaLabel ? `Increase ${ariaLabel.toLowerCase()}` : "Increase value"}>+</button>
       </div>
       <span className={`stepper-hint ${invalid ? "visible" : ""}`}>
         Allowed range: {min} to {max}{unit ? ` ${unit}` : ""}

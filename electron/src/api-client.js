@@ -215,7 +215,7 @@ function createApiClient({ state, fetchImpl = fetch }) {
       payload.close_only = true;
       payload.no_restart = true;
     }
-    await request("/api/local/switch", {
+    const result = await request("/api/local/switch", {
       timeoutMs: 90000,
       method: "POST",
       headers: buildApiHeaders(state),
@@ -223,9 +223,9 @@ function createApiClient({ state, fetchImpl = fetch }) {
     });
     // Usage is refreshed separately. A quota/network outage must not turn a
     // completed switch into a failed button action.
-    const snapshot = await getDesktopState();
+    const snapshot = await getDesktopState().catch(() => lastDesktopState || {});
     const { applyProfileSelection } = await import("./renderer/parity.mjs");
-    return applyProfileSelection(snapshot, name);
+    return { ...applyProfileSelection(snapshot, name), continuationWarning: result?.continuation_warning };
   }
 
   async function saveConfigPatch(patch) {

@@ -6,7 +6,7 @@ const PROFILE_FIXED_COLUMN_WIDTHS = {
   purchased: { compact: 90, default: 100 },
   expires: { compact: 150, default: 170 },
   auto: { compact: 48, default: 48 },
-  actions: { compact: 80, default: 116 },
+  actions: { compact: 116, default: 116 },
 };
 
 const PROFILE_RESIZE_LOCKED_COLUMNS = new Set(["cur", "actions"]);
@@ -78,7 +78,10 @@ export function buildProfileColumnWidths(visibleKeys, viewportSizeClass = "size-
   const keys = Array.isArray(visibleKeys) ? visibleKeys.filter(Boolean) : [];
   const widths = {};
   const flexKeys = keys.filter((key) => fixedWidthForColumn(key, viewportSizeClass) === null);
-  const flexTotal = flexKeys.reduce((total, key) => total + (PROFILE_FLEX_COLUMN_WEIGHTS[key] || 1), 0);
+  const weights = viewportSizeClass === "size-compact"
+    ? { ...PROFILE_FLEX_COLUMN_WEIGHTS, profile: 1.8 }
+    : PROFILE_FLEX_COLUMN_WEIGHTS;
+  const flexTotal = flexKeys.reduce((total, key) => total + (weights[key] || 1), 0);
 
   for (const key of keys) {
     const fixedWidth = fixedWidthForColumn(key, viewportSizeClass);
@@ -86,7 +89,7 @@ export function buildProfileColumnWidths(visibleKeys, viewportSizeClass = "size-
       widths[key] = `${fixedWidth}px`;
       continue;
     }
-    const weight = PROFILE_FLEX_COLUMN_WEIGHTS[key] || 1;
+    const weight = weights[key] || 1;
     const share = flexTotal > 0 ? weight / flexTotal : 1;
     const sharePercent = formatCssNumber(share * 100);
     widths[key] = `${sharePercent}%`;

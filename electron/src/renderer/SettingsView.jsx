@@ -19,7 +19,6 @@ function AutoRefreshSettingsCard({ state, onSavePatch }) {
   return (
     <SettingsCardShell
       title="Refresh rules"
-      description="Control automatic usage refresh timing without changing profile data."
       className="settings-card-refresh"
       testId="settings-card-refresh"
     >
@@ -36,9 +35,10 @@ function AutoRefreshSettingsCard({ state, onSavePatch }) {
             </div>
           </div>
           <div className="setting-row">
-            <SettingCopy label="Delay" helper="Recommended for near-real-time status." />
+            <SettingCopy label="Refresh every" />
             <div className="setting-control">
               <StepperInput
+                ariaLabel="Current account refresh interval in seconds"
                 value={ui.current_refresh_interval_sec ?? 5}
                 min={1}
                 max={3600}
@@ -61,9 +61,10 @@ function AutoRefreshSettingsCard({ state, onSavePatch }) {
             </div>
           </div>
           <div className="setting-row">
-            <SettingCopy label="Delay" helper="Use a longer interval to reduce background churn." />
+            <SettingCopy label="Refresh every" />
             <div className="setting-control">
               <StepperInput
+                ariaLabel="All accounts refresh interval in minutes"
                 value={ui.all_refresh_interval_min ?? 5}
                 min={1}
                 max={60}
@@ -84,7 +85,6 @@ function NotificationsSettingsCard({ state, onNotify, onTestAutoSwitchNotif, onS
   return (
     <SettingsCardShell
       title="Notifications"
-      description="Choose when the desktop shell should warn you about usage thresholds."
       className="settings-card-notifications"
       testId="settings-card-notifications"
       footer={(
@@ -106,13 +106,12 @@ function NotificationsSettingsCard({ state, onNotify, onTestAutoSwitchNotif, onS
               />
             </div>
           </div>
-        </SettingsSubsection>
 
-        <SettingsSubsection title="5h warning threshold" meta="Percent">
           <div className="setting-row">
-            <SettingCopy label="Warning threshold" helper="Warn when the remaining five-hour balance is getting low." />
+            <SettingCopy label="5h warning threshold (%)" />
             <div className="setting-control">
               <StepperInput
+                ariaLabel="5-hour warning threshold"
                 value={notifications.thresholds?.h5_warn_pct ?? 20}
                 min={0}
                 max={100}
@@ -120,13 +119,12 @@ function NotificationsSettingsCard({ state, onNotify, onTestAutoSwitchNotif, onS
               />
             </div>
           </div>
-        </SettingsSubsection>
 
-        <SettingsSubsection title="Weekly warning threshold" meta="Percent">
           <div className="setting-row">
-            <SettingCopy label="Warning threshold" helper="Warn when the weekly balance approaches the selected percentage." />
+            <SettingCopy label="Weekly warning threshold (%)" />
             <div className="setting-control">
               <StepperInput
+                ariaLabel="Weekly warning threshold"
                 value={notifications.thresholds?.weekly_warn_pct ?? 20}
                 min={0}
                 max={100}
@@ -144,7 +142,6 @@ function MacStatusBarSettingsCard({ ui, onSavePatch }) {
   return (
     <SettingsCardShell
       title="Status bar"
-      description="Control whether Codex Account Manager stays visible in the macOS menu bar."
       className="settings-card-status-bar"
       testId="settings-card-status-bar"
     >
@@ -228,6 +225,7 @@ function WindowsIntegrationSettingsCard({ ui, displayTargets, onSavePatch }) {
             <SettingCopy label="Display target" helper="Choose which display the mini meter should follow." />
             <div className="setting-control settings-select-control">
               <select
+                aria-label="Mini meter display"
                 value={String(
                   ui.windows_mini_meter_display_target
                     || (ui.windows_mini_meter_display_mode === "primary" ? "primary" : "follow_focus"),
@@ -257,6 +255,7 @@ function WindowsIntegrationSettingsCard({ ui, displayTargets, onSavePatch }) {
             <SettingCopy label="Font size" helper="Adjust text size for readability on the floating meter." />
             <div className="setting-control">
               <StepperInput
+                ariaLabel="Mini meter font size"
                 value={ui.windows_mini_meter_font_size ?? 14}
                 min={10}
                 max={24}

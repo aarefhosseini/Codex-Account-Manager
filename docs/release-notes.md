@@ -4,6 +4,14 @@ This file tracks user-visible changes by version.
 
 ## Unreleased
 
+## 0.1.2
+
+- Recover from a failed sign-in by restoring the previous state and keeping saved profiles available for another attempt.
+- Switch from a signed-out Codex session even when there is no chat to resume. Report continuation issues separately after a successful switch.
+- Show available Plus renewal or scheduled end dates in the desktop app, with a manual 30-day estimate when billing data is unavailable.
+- Open the desktop app in a smaller window with readable account rows and a visible Switch button. Show more details in wider windows and account cards in narrow ones.
+- Fit refresh rules, notifications, and switch controls into compact layouts. Keep reference topics expandable and give log messages more room on narrow screens.
+
 ## 0.1.0
 
 - Check that Codex and its helpers exit before replacing account credentials. Back up and verify the active credentials, reopen Codex, and queue a continuation message when enabled.

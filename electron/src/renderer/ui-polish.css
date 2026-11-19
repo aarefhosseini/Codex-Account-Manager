@@ -205,3 +205,227 @@ button, summary { touch-action: manipulation; }
   .profiles-table-wrap tbody tr { transform: none !important; transition: none !important; }
   .switch-row-pending td, .switch-row-activated td { animation: none; }
 }
+
+/* Give account rows the available height at the default window size. */
+.profiles-view { padding: 14px 16px !important; }
+.profiles-view-shell { gap: 9px; }
+.profiles-heading h1 { font-size: 20px; }
+.profiles-overview { padding: 9px 13px; gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); }
+.overview-eyebrow { margin-bottom: 2px; }
+.active-account-name { font-size: 15px; }
+.overview-usage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.overview-counts { display: none; }
+.profiles-list-caption { margin: 0; }
+.profiles-table-wrap.table-wrap { flex: 1 1 0; max-height: none; min-height: 0; }
+.profiles-table-wrap table { min-width: 0; }
+.profiles-table-wrap.wide-columns table { min-width: 1040px; }
+.profiles-table-wrap tbody tr { height: 53px; }
+.profile-identity { padding-block: 6px; gap: 2px; }
+.profiles-table-wrap .subscription-period { font-size: 12px; }
+.profiles-table-wrap th[data-col="actions"], .profiles-table-wrap td[data-col="actions"] {
+  position: sticky;
+  right: 0;
+  background: var(--bg-surface);
+  box-shadow: inset 1px 0 var(--border-subtle), inset 0 -1px var(--border-subtle);
+}
+.profiles-table-wrap th[data-col="actions"] { z-index: 12; background: var(--bg-elevated); }
+.profiles-table-wrap td[data-col="actions"] { z-index: 2; }
+.switch-preference { padding: 5px 10px; }
+.switch-preference p { display: none; }
+@media (min-width: 1300px) {
+  .profiles-overview { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(240px, 1fr); }
+  .overview-counts { display: grid; }
+}
+@media (min-width: 761px) {
+  .profiles-view { overflow: hidden; }
+  .profiles-view-shell { flex: 1 1 0; }
+  .profile-filter-tabs { order: initial; flex: 0 1 auto; }
+}
+@media (max-width: 760px) {
+  .profiles-view-shell { min-height: auto; }
+  .profiles-table-wrap.table-wrap { flex: 0 0 auto; overflow: visible; }
+  .mobile-row { padding: 9px 11px; }
+  .mobile-email { margin-block: 5px; }
+  body.size-compact .mobile-stats { grid-template-columns: 1fr 1fr; }
+  .accounts-toolbar .columns-btn { display: none; }
+}
+
+body.size-compact .sidebar { padding-inline: 6px; }
+body.size-compact .sidebar nav button,
+body.size-compact .sidebar-exit-btn { width: 100%; }
+
+@media (min-width: 761px) and (max-width: 999px) {
+  .profiles-view-shell { padding: 0; }
+  .profiles-overview { padding-block: 6px; }
+  .profiles-overview .active-account-summary { display: flex; align-items: center; gap: 8px; }
+  .profiles-overview .overview-eyebrow { margin: 0; white-space: nowrap; }
+  .profiles-overview .active-account-email { display: none; }
+  .overview-usage .progress-line { margin-top: 1px; }
+  .profile-identity-email { font-size: 12px; }
+}
+
+/* Keep secondary pages content-sized and put controls alongside their labels. */
+:is(.settings-view, .autoswitch-view, .guide-view, .update-view, .about-view, .debug-view) {
+  --page-card-gap: 10px;
+  --page-inset: clamp(12px, 1.5vw, 22px);
+}
+
+:is(.settings-view, .autoswitch-view, .guide-view, .update-view, .about-view) > :is(.settings-layout, .guide-layout, .sparse-page-layout) {
+  width: 100%;
+  max-width: 1220px;
+  height: auto;
+  min-height: 0;
+  margin-inline: auto;
+  padding: var(--page-inset);
+  flex: 0 0 auto;
+  gap: var(--page-card-gap);
+  align-items: start;
+}
+
+:is(.settings-view, .autoswitch-view, .about-view) { padding-bottom: 0; }
+:is(.settings-view, .autoswitch-view, .about-view) .settings-card-stack {
+  gap: var(--page-card-gap);
+  min-height: 0;
+  align-items: start;
+  grid-auto-rows: auto;
+}
+
+:is(.settings-view, .autoswitch-view, .about-view, .guide-view, .update-view) .settings-card {
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 9px;
+  background: var(--bg-surface);
+}
+
+:is(.settings-view, .autoswitch-view, .about-view) .settings-card.settings-card-shell {
+  height: auto;
+  min-height: 0;
+  gap: 10px;
+}
+
+body .settings-view .settings-card-stack-main > .settings-card.settings-card-shell { height: auto; }
+
+:is(.settings-view, .autoswitch-view, .about-view, .guide-view, .update-view) .settings-card .group-title {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+:is(.settings-view, .autoswitch-view, .about-view) .settings-card-header,
+:is(.settings-view, .autoswitch-view, .about-view) .settings-card-body,
+:is(.settings-view, .autoswitch-view) .settings-subsection-stack { gap: 8px; }
+
+:is(.settings-view, .autoswitch-view) .settings-subsection {
+  align-content: start;
+  padding: 8px 10px;
+  gap: 5px;
+  border-radius: 7px;
+}
+
+:is(.settings-view, .autoswitch-view) .settings-subsection-head { padding-block: 2px 4px; }
+:is(.settings-view, .autoswitch-view) .settings-subsection-head h3 { font-size: 12px; }
+body :is(.settings-view, .autoswitch-view) .settings-card .setting-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding-block: 2px;
+}
+
+body :is(.settings-view, .autoswitch-view) .settings-card .setting-control {
+  justify-self: end;
+  width: auto;
+  min-width: 0;
+}
+
+:is(.settings-view, .autoswitch-view) .setting-label { font-size: 12px; }
+.settings-view .setting-copy { gap: 3px; }
+.settings-view .setting-copy-helper { font-size: 11px; line-height: 1.35; }
+:is(.settings-view, .autoswitch-view) .setting-current-value { font-size: 12px; text-align: end; }
+:is(.settings-view, .autoswitch-view) .settings-card-footer { padding-top: 8px; margin-top: 0; }
+:is(.settings-view, .autoswitch-view, .guide-view, .update-view, .debug-view) .btn {
+  min-height: 32px;
+  padding-inline: 10px;
+  font-size: 12px;
+}
+
+body .settings-view .settings-card-stack-main {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+}
+.settings-view .settings-card-windows { grid-column: 1 / -1; }
+.settings-view .settings-card-status-bar { width: 100%; }
+
+body .autoswitch-view .settings-card .autoswitch-rules-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 8px;
+}
+.autoswitch-view .metric-pair-grid { gap: 5px; }
+.autoswitch-view .setting-current-value.pending { color: var(--color-amber); }
+.autoswitch-chain-preview { display: grid; gap: 6px; min-width: 0; }
+.autoswitch-chain-preview > .muted { font-size: 11px; }
+.autoswitch-view .chain-track { gap: 6px; padding-block: 3px; }
+.autoswitch-view .chain-node { padding: 5px 8px; max-width: 100%; }
+.autoswitch-view .chain-name { min-width: 0; overflow-wrap: anywhere; }
+.autoswitch-view .chain-track-wrap { min-width: 0; overflow-x: auto; }
+
+body .guide-view .guide-layout { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.guide-view .guide-quick { gap: var(--page-card-gap); }
+.guide-view .guide-shortcuts-card { flex: 0 0 auto; gap: 8px; }
+.guide-view .guide-shortcuts-table { gap: 0; overflow: visible; }
+.guide-view .guide-shortcuts-row { min-height: 25px; padding-block: 2px; font-size: 12px; }
+.guide-view .guide-shortcuts-row + .guide-shortcuts-row { border-top: 1px solid var(--border-subtle); }
+.guide-view .guide-topic { padding: 8px 9px; font-size: 12px; }
+.guide-view .guide-reference-card { overflow: visible; }
+
+.update-view .sparse-page-layout { grid-template-rows: auto auto; }
+.update-view .update-status-card { display: grid; gap: 10px; }
+.update-view :is(.update-status-pill, .update-layer-item) {
+  border-color: var(--border-subtle);
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+}
+.update-view .update-layer-item-value { overflow-wrap: anywhere; }
+.update-view .update-changelog-card { flex: 0 0 auto; gap: 8px; }
+.update-view .release-sections { overflow: visible; }
+.update-changelog-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+
+body .debug-view { padding: var(--page-inset); gap: 8px; }
+body .debug-view .debug-toolbar {
+  grid-template-columns: minmax(0, 1fr) auto minmax(140px, 230px);
+  gap: 8px;
+}
+.debug-view .debug-filter-chips { flex-wrap: wrap; gap: 4px; }
+.debug-view .debug-toolbar input { width: 100%; min-width: 0; min-height: 32px; }
+.debug-view .debug-log-panel { padding: 9px 10px 34px; }
+.debug-view:not(.debug-capturing) .debug-log-panel-wrap { flex: 0 0 auto; }
+.debug-view:not(.debug-capturing) .debug-log-panel { height: auto; padding-bottom: 9px; }
+
+body .about-view .about-details-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 235px), 1fr));
+  gap: 6px;
+}
+.about-view .about-detail-item { padding: 7px 9px; gap: 2px; }
+.about-view .about-merged-card .about-identity { justify-content: start; gap: 10px; }
+.about-view .about-identity h2 { font-size: 16px; line-height: 1.35; }
+.about-view .about-identity p { font-size: 12px; }
+
+@media (max-width: 730px) {
+  body .debug-view .debug-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .debug-view .debug-toolbar input { grid-column: 1 / -1; }
+  .debug-view .debug-actions-right { justify-content: start; }
+  .debug-view .debug-line {
+    grid-template-columns: max-content max-content minmax(0, 1fr);
+    gap: 3px 8px;
+  }
+  .debug-view .debug-source { overflow-wrap: anywhere; white-space: normal; }
+  .debug-view .debug-message { grid-column: 1 / -1; }
+}
+
+@media (max-width: 410px) {
+  body .debug-view .debug-toolbar { grid-template-columns: minmax(0, 1fr); }
+}

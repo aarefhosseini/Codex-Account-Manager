@@ -64,7 +64,7 @@ CAM_CONFIG_FILE = CAM_DIR / "config.json"
 CAM_LOG_FILE = CAM_DIR / "ui.log"
 CAM_LOG_MAX_BYTES = 2 * 1024 * 1024
 CAM_LOG_BACKUPS = 4
-DEFAULT_APP_VERSION = "0.1.0"
+DEFAULT_APP_VERSION = "0.1.2"
 
 
 def _build_ui_version(file_path: str = __file__) -> str:
@@ -833,12 +833,16 @@ def load_json(path: Path):
 
 
 def atomic_write_json(path: Path, payload) -> None:
+    atomic_write_bytes(path, json.dumps(payload, indent=2).encode("utf-8"))
+
+
+def atomic_write_bytes(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     tmp_path = Path(tmp)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
+        with os.fdopen(fd, "wb") as f:
+            f.write(payload)
         os.replace(str(tmp_path), str(path))
     finally:
         try:
@@ -1518,7 +1522,10 @@ def _codex_cli_fallback_candidates() -> list[Path]:
     if cfg_cli:
         out.append(Path(cfg_cli).expanduser())
     if sys.platform == "darwin":
-        out.append(Path("/Applications/Codex.app/Contents/Resources/codex"))
+        for app in _desktop_apps():
+            if app.bundle:
+                resources = Path(app.bundle) / "Contents/Resources"
+                out.extend([resources / "codex-cli/bin/codex", resources / "codex"])
     elif sys.platform.startswith("win"):
         local = os.environ.get("LOCALAPPDATA")
         appdata = os.environ.get("APPDATA")
@@ -2430,7 +2437,7 @@ def sync_profile_auth_snapshot(
         target_data = None
     source_pid = str(_principal_id_from_data(source_data) or "").strip()
     target_pid = str(_principal_id_from_data(target_data) or "").strip()
-    if expected_pid and source_pid and source_pid != expected_pid:
+    if expected_pid and source_pid != expected_pid:
         # Guard against stale "current profile" detection races that can overwrite
         # the wrong saved profile snapshot during concurrent switch + refresh.
         return False
@@ -3076,53 +3083,68 @@ def _perform_profile_switch(name: str, restart_codex: bool, close_only: bool, re
     launch_app = next((app for app in apps if any(r["executable"] == app.executable for r in rows)), apps[0] if apps else None)
     resume_url = desktop.last_thread_url(CODEX_HOME) if restart_codex else ""
     resume_cli = ""
+    continuation_warning = ""
     if restart_codex and resume_work:
         if not resume_url:
-            raise RuntimeError("Cannot identify the previous local chat. Open the chat in Codex, or turn off Continue unfinished work, then retry. Account was not changed.")
-        try:
-            fallback = resolve_codex_cli()
-        except Exception:
-            fallback = ""
-        resume_cli = continuation.find_resume_cli(apps, fallback, CODEX_HOME, run=_subprocess_run)
+            continuation_warning = "No previous local chat was found."
+        else:
+            try:
+                try:
+                    fallback = resolve_codex_cli()
+                except RuntimeError:
+                    fallback = ""
+                resume_cli = continuation.find_resume_cli(apps, fallback, CODEX_HOME, run=_subprocess_run)
+            except Exception:
+                continuation_warning = "Automatic continuation is unavailable. Update the Codex CLI to enable it."
     if apps:
         print("Closing Codex and waiting for its background processes...")
         desktop.stop_apps(apps, run=_subprocess_run)
         if desktop.desktop_processes(desktop.process_snapshot(_subprocess_run), apps):
             raise RuntimeError("Codex is still running. Account was not changed; close Codex and retry.")
-    # Save refreshed credentials from the outgoing account after it has fully exited.
-    if AUTH_FILE.exists():
-        old_id = principal_id_from_auth(AUTH_FILE)
-        for row in collect_list_data():
-            if old_id and profile_principal_id(row["name"]) == old_id:
-                sync_profile_auth_snapshot(row["name"], AUTH_FILE, str(AUTH_FILE), expected_principal_id=old_id)
-        target_data = load_json(source_auth)
-    AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
-    previous = load_json(AUTH_FILE) if AUTH_FILE.exists() else None
-    if previous is not None:
-        backup = BACKUPS_DIR / f"auth-{now_stamp()}-{secrets.token_hex(4)}.json"
-        atomic_write_json(backup, previous)
-        _set_private_permissions(backup)
     try:
+        previous = AUTH_FILE.read_bytes()
+    except FileNotFoundError:
+        previous = None
+
+    def restore_previous():
+        if previous is None:
+            AUTH_FILE.unlink(missing_ok=True)
+        else:
+            atomic_write_bytes(AUTH_FILE, previous)
+            _set_private_permissions(AUTH_FILE)
+
+    try:
+        if previous is not None:
+            backup = BACKUPS_DIR / f"auth-{now_stamp()}-{secrets.token_hex(4)}.json"
+            atomic_write_bytes(backup, previous)
+            _set_private_permissions(backup)
+            old_id = principal_id_from_auth(AUTH_FILE)
+            if old_id:
+                for row in collect_list_data():
+                    if row["name"] != name and profile_principal_id(row["name"]) == old_id:
+                        sync_profile_auth_snapshot(row["name"], AUTH_FILE, str(AUTH_FILE), expected_principal_id=old_id)
+
         atomic_write_json(AUTH_FILE, target_data)
         _set_private_permissions(AUTH_FILE)
         if load_json(AUTH_FILE) != target_data:
             raise RuntimeError("Written account credentials could not be verified.")
-    except Exception:
-        if previous is not None:
-            atomic_write_json(AUTH_FILE, previous)
-            _set_private_permissions(AUTH_FILE)
-        else:
-            AUTH_FILE.unlink(missing_ok=True)
-        raise RuntimeError("Could not write account credentials. Previous account was restored; check auth.json permissions and retry.") from None
-    # Refresh only after the old desktop and its app-server have stopped.
-    expected_id = _principal_id_from_data(target_data)
-    refresh_and_sync_live_auth_snapshot(name, expected_principal_id=expected_id, reason="profile-switch", timeout_sec=12)
-    if expected_id and principal_id_from_auth(AUTH_FILE) != expected_id:
-        if previous is not None:
-            atomic_write_json(AUTH_FILE, previous)
-        else:
-            AUTH_FILE.unlink(missing_ok=True)
-        raise RuntimeError("Account verification failed after refresh. Previous account was restored; re-login to the target profile and retry.")
+
+        expected_id = _principal_id_from_data(target_data)
+        verified = refresh_and_sync_live_auth_snapshot(name, expected_principal_id=expected_id, reason="profile-switch", timeout_sec=12)
+        if (expected_id and principal_id_from_auth(AUTH_FILE) != expected_id) or (restart_codex and not verified):
+            raise RuntimeError("Codex could not verify the selected sign-in. Re-login to that profile or select a different account.")
+    except Exception as error:
+        try:
+            restore_previous()
+        except OSError as rollback_error:
+            raise RuntimeError("Switch failed and the previous credentials could not be restored. Check file permissions and the account backup.") from rollback_error
+        if restart_codex and rows:
+            try:
+                desktop.start_app(launch_app, run=_subprocess_run)
+            except Exception:
+                raise RuntimeError(f"{error} Previous credentials restored. Reopen Codex manually.") from error
+        raise RuntimeError(f"{error} Previous sign-in state restored.") from error
+
     if restart_codex:
         print("Reopening Codex...")
         try:
@@ -3135,8 +3157,11 @@ def _perform_profile_switch(name: str, restart_codex: bool, close_only: bool, re
             try:
                 continuation.continue_thread(resume_cli, resume_url.rsplit("/", 1)[-1], CODEX_HOME, run=_subprocess_run)
             except Exception as error:
-                raise RuntimeError(f"Account changed to '{name}' and Codex reopened, but automatic continuation needs attention: {error}") from error
-            print("Continuation message queued for the previous chat.")
+                continuation_warning = str(error)
+            else:
+                print("Continuation message queued for the previous chat.")
+        if continuation_warning:
+            print(f"warning: {continuation_warning}")
     print(f"switched to profile '{name}'")
     return 0
 
@@ -4756,6 +4781,7 @@ def cmd_ui_serve(host: str, port: int, no_open: bool, interval_sec: float, idle_
                 if rc != 0:
                     message = next((line.removeprefix("error: ").strip() for line in reversed((out + "\n" + err).splitlines()) if line.startswith("error:")), "Account switch failed. Check the error details and retry.")
                     return _json_error("CONFLICT" if rc == 409 else "SWITCH_FAILED", message, 409 if rc == 409 else 400, payload)
+                payload["continuation_warning"] = next((line[9:] for line in out.splitlines() if line.startswith("warning: ")), "")
                 push_event("switch-manual", f"manually switched to '{name}'")
                 return _json_ok(payload)
             if self.command == "POST" and path == "/api/ui-config":

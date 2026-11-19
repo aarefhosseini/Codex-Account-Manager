@@ -96,6 +96,6 @@ test("profile column widths use compact fixed widths for utility columns", async
   const widths = buildProfileColumnWidths(["cur", "profile", "email", "h5", "weekly", "actions"], "size-compact");
 
   assert.equal(widths.cur, "18px");
-  assert.equal(widths.actions, "80px");
+  assert.equal(widths.actions, "116px");
   assert.match(widths.email, /^[0-9.]+%$/);
 });

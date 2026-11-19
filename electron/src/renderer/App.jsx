@@ -649,13 +649,10 @@ function planBadgeVariant(value) {
 
 function isColumnVisibleForViewport(key, viewportSizeClass) {
   if (viewportSizeClass === "size-compact") {
-    return !["h5remain", "weeklyremain", "h5reset", "weeklyreset", "plan", "paid", "id", "added", "note", "auto"].includes(key);
+    return ["cur", "profile", "h5", "weekly", "expires", "actions"].includes(key);
   }
   if (viewportSizeClass === "size-normal") {
-    return !["id", "added", "note", "h5reset", "weeklyreset"].includes(key);
-  }
-  if (viewportSizeClass === "size-wide") {
-    return !["id", "note"].includes(key);
+    return ["cur", "profile", "h5", "h5remain", "weekly", "weeklyremain", "plan", "expires", "actions"].includes(key);
   }
   return true;
 }
@@ -996,7 +993,7 @@ function SidebarUsageArc({ metric, value }) {
   );
 }
 
-const SIDEBAR_APP_VERSION_FALLBACK = "v0.1.0";
+const SIDEBAR_APP_VERSION_FALLBACK = "v0.1.2";
 
 function VersionDisplay({ version, updaterDevMode = false, className = "" }) {
   const appVersion = String(version || SIDEBAR_APP_VERSION_FALLBACK).trim() || SIDEBAR_APP_VERSION_FALLBACK;
@@ -1328,7 +1325,8 @@ function AccountsTable({
       sortable: !["cur", "actions"].includes(column.key),
       render: (profile) => {
         const quotaBlocked = (usageValue(profile, "usage_5h") ?? 1) <= 0 || (usageValue(profile, "usage_weekly") ?? 1) <= 0;
-        const disableSwitch = profile.is_current || Boolean(switching);
+        const currentReady = profile.is_current && !isAuthExpiredLabel(usageErrorLabel(profile.error));
+        const disableSwitch = currentReady || Boolean(switching);
         const isSwitchingProfile = switching === profile.name;
         const noteText = String(profile.note || (profile.same_principal ? "same-principal" : "")).trim();
         const h5Loading = isUsageLoadingState(profile.usage_5h, profile.error, profile.loading_usage);
@@ -1342,7 +1340,7 @@ function AccountsTable({
           case "profile":
             return <div className="profile-identity">
               <div><strong className="profile-name">{profile.name}</strong>{profile.is_current ? <span className="current-account-tag">Current</span> : null}</div>
-              {!visibleColumns.email ? <span className="profile-identity-email" title={profile.email_display}>{profile.email_display}</span> : null}
+              {(!visibleColumns.email || !isColumnVisibleForViewport("email", viewportSizeClass)) ? <span className="profile-identity-email" title={profile.email_display}>{profile.email_display}</span> : null}
             </div>;
           case "email":
             return <span className="muted" title={profile.email_display}>{profile.email_display}</span>;
@@ -1431,58 +1429,29 @@ function AccountsTable({
             );
           case "actions":
             return (
-              <div className={`actions-cell ${compactMode ? "compact" : ""}`} role="group" aria-label={`Actions for ${profile.name}`}>
-                {compactMode ? (
-                  <>
-                    <Button
-                      variant={quotaBlocked ? "danger" : "primary"}
-                      className={`actions-menu-btn actions-switch-btn ${disableSwitch ? "btn-disabled" : ""} ${isSwitchingProfile ? "switch-loading-btn" : ""}`}
-                      loading={isSwitchingProfile}
-                      disabled={disableSwitch}
-                      data-current-account={profile.is_current}
-                      disabledReason={profile.is_current ? "This account is already active" : "Wait for the current switch to finish"}
-                      onClick={(event) => onSwitch(profile.name, { animate: event.detail > 0 })}
-                      aria-label={`Switch to ${profile.name}`}
-                      title={isSwitchingProfile ? `Switching to ${profile.name}` : `Switch to ${profile.name}`}
-                    >
-                      {isSwitchingProfile ? <span className="visually-hidden">Switching</span> : "⇄"}
-                    </Button>
-                    <Button
-                      className="actions-menu-btn"
-                      data-row-actions={profile.name}
-                      aria-label={`row actions ${profile.name}`}
-                      title="Row actions"
-                      onClick={() => onOpenRowActions(profile)}
-                    >
-                      ⋯
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Button
-                      variant={quotaBlocked ? "danger" : "primary"}
-                      className={`${disableSwitch ? "btn-disabled" : ""} ${isSwitchingProfile ? "switch-loading-btn" : ""}`.trim()}
-                      loading={isSwitchingProfile}
-                      disabled={disableSwitch}
-                      data-current-account={profile.is_current}
-                      disabledReason={profile.is_current ? "This account is already active" : "Wait for the current switch to finish"}
-                      onClick={(event) => onSwitch(profile.name, { animate: event.detail > 0 })}
-                      aria-label={isSwitchingProfile ? `Switching to ${profile.name}` : `Switch to ${profile.name}`}
-                      title={isSwitchingProfile ? `Switching to ${profile.name}` : `Switch to ${profile.name}`}
-                    >
-                      {isSwitchingProfile ? <span className="visually-hidden">Switching</span> : profile.is_current ? "Active" : "Switch"}
-                    </Button>
-                    <Button
-                      className="actions-menu-btn"
-                      data-row-actions={profile.name}
-                      aria-label={`row actions ${profile.name}`}
-                      title="Row actions"
-                      onClick={() => onOpenRowActions(profile)}
-                    >
-                      ⋯
-                    </Button>
-                  </>
-                )}
+              <div className="actions-cell" role="group" aria-label={`Actions for ${profile.name}`}>
+                <Button
+                  variant={quotaBlocked ? "danger" : "primary"}
+                  className={`${disableSwitch ? "btn-disabled" : ""} ${isSwitchingProfile ? "switch-loading-btn" : ""}`.trim()}
+                  loading={isSwitchingProfile}
+                  disabled={disableSwitch}
+                  data-current-account={currentReady}
+                  disabledReason={currentReady ? "This account is already active" : "Wait for the current switch to finish"}
+                  onClick={(event) => onSwitch(profile.name, { animate: event.detail > 0 })}
+                  aria-label={isSwitchingProfile ? `Switching to ${profile.name}` : `Switch to ${profile.name}`}
+                  title={isSwitchingProfile ? `Switching to ${profile.name}` : `Switch to ${profile.name}`}
+                >
+                  {isSwitchingProfile ? <span className="visually-hidden">Switching</span> : currentReady ? "Active" : "Switch"}
+                </Button>
+                <Button
+                  className="actions-menu-btn"
+                  data-row-actions={profile.name}
+                  aria-label={`row actions ${profile.name}`}
+                  title="Row actions"
+                  onClick={() => onOpenRowActions(profile)}
+                >
+                  ⋯
+                </Button>
               </div>
             );
           default:
@@ -1521,7 +1490,8 @@ function AccountsMobileList({ profiles, switching, onSwitch, onOpenRowActions, o
         const weeklyValue = usageValue(profile, "usage_weekly");
         const rowErrorLabel = usageErrorLabel(profile.error);
         const quotaBlocked = (h5Value ?? 1) <= 0 || (weeklyValue ?? 1) <= 0;
-        const switchDisabled = profile.is_current || Boolean(switching);
+        const currentReady = profile.is_current && !isAuthExpiredLabel(rowErrorLabel);
+        const switchDisabled = currentReady || Boolean(switching);
         const isSwitchingProfile = switching === profile.name;
         const h5Tone = usageTone(h5Value);
         const weeklyTone = usageTone(weeklyValue);
@@ -1560,7 +1530,7 @@ function AccountsMobileList({ profiles, switching, onSwitch, onOpenRowActions, o
                   aria-label={isSwitchingProfile ? `Switching to ${profile.name}` : `Switch to ${profile.name}`}
                   title={isSwitchingProfile ? `Switching to ${profile.name}` : `Switch to ${profile.name}`}
                 >
-                  {isSwitchingProfile ? <span className="visually-hidden">Switching</span> : profile.is_current ? "Active" : "Switch"}
+                  {isSwitchingProfile ? <span className="visually-hidden">Switching</span> : currentReady ? "Active" : "Switch"}
                 </Button>
                 <Button className="actions-menu-btn" data-mobile-row-actions={profile.name} aria-label={`Row actions for ${profile.name}`} onClick={() => onOpenRowActions(profile)}>⋯</Button>
               </div>
@@ -1645,7 +1615,7 @@ function ProfilesView({
   const allProfiles = sortedProfiles;
   const profiles = filterProfiles(allProfiles, query, filter);
   const activeColumnCount = columnDefs.filter((column) => visibleColumns?.[column.key] && isColumnVisibleForViewport(column.key, viewportSizeClass)).length;
-  const wideMode = activeColumnCount > 8;
+  const wideMode = ["size-wide", "size-ultrawide"].includes(viewportSizeClass) && activeColumnCount > 8;
   const manageRef = useRef(null);
   useEffect(() => {
     const closeOutside = (event) => {
@@ -1693,7 +1663,7 @@ function ProfilesView({
             </details>
           </div>
         </div>
-        <div className="profiles-list-caption">
+        <div className={`profiles-list-caption ${compactMode ? "visually-hidden" : ""}`}>
           <span aria-live="polite">{state ? `${profiles.length} of ${allProfiles.length} accounts` : "Loading accounts…"}</span>
         </div>
         <div className={`table-wrap profiles-table-wrap scrollable ${wideMode ? "wide-columns" : ""}`} aria-busy={!state}>
@@ -1788,7 +1758,6 @@ function AutoSwitchView({ state, autoChain, onSavePatch, onOpenChainEdit, onRunS
         <div className="settings-card-stack settings-card-stack-main autoswitch-card-stack">
           <SettingsCardShell
             title="Auto-switch rules"
-            description="Configure execution timing and run controls for automatic profile switching."
             className={`autoswitch-card-execution auto-switch-card ${pendingSwitch ? "armed" : ""}`}
             testId="autoswitch-card-execution"
             footer={(
@@ -1806,11 +1775,6 @@ function AutoSwitchView({ state, autoChain, onSavePatch, onOpenChainEdit, onRunS
               </div>
             )}
           >
-            <div className="auto-switch-head">
-              <div className="k">Pending switch</div>
-              <div className={`auto-switch-countdown ${pendingSwitch ? "active pending" : "active idle"}`}>{countdownText}</div>
-            </div>
-
             <div className="settings-subsection-stack">
               <div className="rules-grid autoswitch-rules-grid">
                 <SettingsSubsection title="Execution">
@@ -1828,6 +1792,7 @@ function AutoSwitchView({ state, autoChain, onSavePatch, onOpenChainEdit, onRunS
                     <SettingCopy label="Delay (seconds)" title="Wait before executing the next switch operation." />
                     <div className="setting-control">
                       <StepperInput
+                        ariaLabel="Switch delay in seconds"
                         value={autoConfig.delay_sec ?? 60}
                         min={0}
                         max={3600}
@@ -1849,7 +1814,7 @@ function AutoSwitchView({ state, autoChain, onSavePatch, onOpenChainEdit, onRunS
                   <div className="setting-row setting-row-top">
                     <SettingCopy label="Ranking mode" title="Define how accounts are ranked for the next switch." />
                     <div className="setting-control settings-select-control">
-                      <select value={autoConfig.ranking_mode || "balanced"} onChange={(event) => onSavePatch({ auto_switch: { ranking_mode: event.target.value } })}>
+                      <select aria-label="Ranking mode" value={autoConfig.ranking_mode || "balanced"} onChange={(event) => onSavePatch({ auto_switch: { ranking_mode: event.target.value } })}>
                         <option value="balanced">balanced</option>
                         <option value="max_5h">max_5h</option>
                         <option value="max_weekly">max_weekly</option>
@@ -1862,6 +1827,7 @@ function AutoSwitchView({ state, autoChain, onSavePatch, onOpenChainEdit, onRunS
                       <SettingCopy label="5h switch (%)" title="Switch when five-hour usage reaches this threshold." />
                       <div className="setting-control">
                         <StepperInput
+                          ariaLabel="5-hour switch threshold"
                           value={autoConfig.thresholds?.h5_switch_pct ?? 20}
                           min={0}
                           max={100}
@@ -1873,6 +1839,7 @@ function AutoSwitchView({ state, autoChain, onSavePatch, onOpenChainEdit, onRunS
                       <SettingCopy label="Weekly switch (%)" title="Switch when weekly usage reaches this threshold." />
                       <div className="setting-control">
                         <StepperInput
+                          ariaLabel="Weekly switch threshold"
                           value={autoConfig.thresholds?.weekly_switch_pct ?? 20}
                           min={0}
                           max={100}
@@ -1888,55 +1855,45 @@ function AutoSwitchView({ state, autoChain, onSavePatch, onOpenChainEdit, onRunS
 
           <SettingsCardShell
             title="Switch chain"
-            description="Inspect the current chain order used by the auto-switch engine."
             className="autoswitch-card-chain auto-switch-card"
             testId="autoswitch-card-chain"
           >
-            <div className="settings-subsection-stack">
-              <SettingsSubsection
-                title="Chain preview"
-                meta={`${chainCount} account${chainCount === 1 ? "" : "s"}`}
-              >
-                <div className="chain-track-wrap">
-                  <div className="chain-track">
-                    {chainRows.length ? chainRows.map((row, index) => (
-                      <React.Fragment key={row.name}>
-                        <span className="chain-node">
-                          <span className="chain-name">{row.name}</span>
-                          <span className={["chain-metric", progressToneClass(row.usage_5h)].filter(Boolean).join(" ")} title="5-hour usage">
-                            5H {formatPctValue(row.usage_5h)}
-                          </span>
-                          <span className={["chain-metric", progressToneClass(row.usage_weekly)].filter(Boolean).join(" ")} title="Weekly usage">
-                            W {formatPctValue(row.usage_weekly)}
-                          </span>
+            <div className="autoswitch-chain-preview">
+              <span className="muted">{chainCount} account{chainCount === 1 ? "" : "s"} · 5h and weekly quota</span>
+              <div className="chain-track-wrap">
+                <div className="chain-track">
+                  {chainRows.length ? chainRows.map((row, index) => (
+                    <React.Fragment key={row.name}>
+                      <span className="chain-node">
+                        <span className="chain-name">{row.name}</span>
+                        <span className={["chain-metric", progressToneClass(row.usage_5h)].filter(Boolean).join(" ")} title="5-hour usage">
+                          5H {formatPctValue(row.usage_5h)}
                         </span>
-                        {index < chainRows.length - 1 ? (
-                          <span className="chain-arrow" aria-hidden="true">
-                            <ArrowRightIcon />
-                          </span>
-                        ) : null}
-                      </React.Fragment>
-                    )) : <span className="muted">No profiles available.</span>}
-                  </div>
+                        <span className={["chain-metric", progressToneClass(row.usage_weekly)].filter(Boolean).join(" ")} title="Weekly usage">
+                          W {formatPctValue(row.usage_weekly)}
+                        </span>
+                      </span>
+                      {index < chainRows.length - 1 ? (
+                        <span className="chain-arrow" aria-hidden="true">
+                          <ArrowRightIcon />
+                        </span>
+                      ) : null}
+                    </React.Fragment>
+                  )) : <span className="muted">No profiles available.</span>}
                 </div>
-                <div className="chain-key">
-                  <span title="5H means five-hour usage window">5H = 5-hour usage</span>
-                  {" · "}
-                  <span title="W means weekly usage window">W = weekly usage</span>
-                </div>
-                <div className="settings-inline-actions autoswitch-chain-actions">
-                  <Button
-                    variant="primary"
-                    loading={autoArrangeBusy}
-                    disabled={autoArrangeBusy}
-                    onClick={onAutoArrange}
-                    title="Automatically reorder the switch chain based on current ranking policy."
-                  >
-                    Auto Arrange
-                  </Button>
-                  <Button onClick={onOpenChainEdit}>Edit</Button>
-                </div>
-              </SettingsSubsection>
+              </div>
+              <div className="settings-inline-actions autoswitch-chain-actions">
+                <Button
+                  variant="primary"
+                  loading={autoArrangeBusy}
+                  disabled={autoArrangeBusy}
+                  onClick={onAutoArrange}
+                  title="Automatically reorder the switch chain based on current ranking policy."
+                >
+                  Auto Arrange
+                </Button>
+                <Button onClick={onOpenChainEdit}>Edit</Button>
+              </div>
             </div>
           </SettingsCardShell>
         </div>
@@ -1971,37 +1928,12 @@ function GuideView({ isMacDesktop = false }) {
         <div className="guide-quick">
           <SectionCard className="settings-card guide-quick-card">
             <div className="group-title">Quick start</div>
-            <p className="muted">Use Add Account, Switch, Import, Export, and Auto Switch from the desktop shell.</p>
-            <div className="guide-layer-map">
-              <LabelValueRow label="Python core" value="Profile storage, switching, usage fetch, and local /api endpoints." />
-              <LabelValueRow label="Web UI" value="Stable browser panel with complete local controls and release guidance." />
-              <LabelValueRow label="Electron UI" value="Desktop shell, tray/menu integration, runtime setup, and windowed workflow." />
-            </div>
+            <p className="muted">Add or switch accounts from Profiles. Find import and export under Manage.</p>
           </SectionCard>
 
-          <SectionCard className="settings-card guide-shortcuts-card">
-            <div className="group-title">Key shortcuts</div>
-            <div className="guide-shortcuts-table">
-              {shortcuts.map((item) => (
-                <div key={item.id} className="guide-shortcuts-row">
-                  <span className="muted">{item.label}</span>
-                  <div className="guide-shortcuts-keys">
-                    {item.keys.map((keyLabel) => (
-                      <code key={`${item.id}-${keyLabel}`}>{keyLabel}</code>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-        </div>
-        <div className="guide-reference">
           <SectionCard className="settings-card guide-reference-card">
-            <div className="group-title">Guide map</div>
-            <p className="muted guide-reference-copy">
-              This view explains how the Python core, web panel, and desktop shell work together so you can choose the right control surface per task.
-            </p>
-            <details className="guide-topic" open>
+            <div className="group-title">Reference</div>
+            <details className="guide-topic">
               <summary>Python core and CLI contract</summary>
               <ul className="guide-list">
                 <li>The Python core is the source of truth for profiles, switching, usage collection, notifications, and auto-switch state.</li>
@@ -2009,7 +1941,7 @@ function GuideView({ isMacDesktop = false }) {
                 <li>Electron and web both consume the same local API contract, so profile data and status stay consistent across surfaces.</li>
               </ul>
             </details>
-            <details className="guide-topic" open>
+            <details className="guide-topic">
               <summary>Web UI parity and shared behavior</summary>
               <ul className="guide-list">
                 <li>Profiles, Auto Switch, notifications thresholds, import/export flows, release notes, and update actions mirror the web panel behavior.</li>
@@ -2044,6 +1976,21 @@ function GuideView({ isMacDesktop = false }) {
             </details>
           </SectionCard>
         </div>
+        <SectionCard className="settings-card guide-shortcuts-card">
+          <div className="group-title">Key shortcuts</div>
+          <div className="guide-shortcuts-table">
+            {shortcuts.map((item) => (
+              <div key={item.id} className="guide-shortcuts-row">
+                <span className="muted">{item.label}</span>
+                <div className="guide-shortcuts-keys">
+                  {item.keys.map((keyLabel) => (
+                    <code key={`${item.id}-${keyLabel}`}>{keyLabel}</code>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
       </div>
     </section>
   );
@@ -2131,8 +2078,6 @@ function UpdateView({
               <span className="update-status-pill-label">Status</span>
               <span>{compactStatusSummary}</span>
             </div>
-          </div>
-          <div className="update-source-row">
             <div className="update-status-pill update-source-pill">
               <span className="update-status-pill-label">Source</span>
               <span>{updateStatus?.status_text || updateStatus?.status || "Unknown"}</span>
@@ -2182,8 +2127,8 @@ function UpdateView({
           </div>
         </SectionCard>
         <SectionCard className="settings-card guide-changelog-card sparse-bottom-fill update-changelog-card">
-          <div className="group-title">Changelog</div>
-          <div className="settings-inline-actions">
+          <div className="update-changelog-heading">
+            <div className="group-title">Changelog</div>
             <Button onClick={onRefreshReleaseNotes}>Reload release notes</Button>
           </div>
           <div className="release-sections scrollable scrollable-with-fade">
@@ -2347,8 +2292,8 @@ function DebugView({ debugLogs, captureEnabled, onStartCapture, onStopCapture, o
   }
 
   return (
-    <section className="view debug-view">
-      <div className="settings-inline-actions debug-actions debug-actions-right">
+    <section className={`view debug-view${captureEnabled ? " debug-capturing" : ""}`}>
+      <div className="settings-inline-actions debug-actions debug-actions-right" role="group" aria-label="Log capture actions">
         <Button
           variant={captureEnabled ? "danger" : "primary"}
           onClick={captureEnabled ? onStopCapture : onStartCapture}
@@ -2359,7 +2304,7 @@ function DebugView({ debugLogs, captureEnabled, onStartCapture, onStopCapture, o
         <Button onClick={onExport}>Export debug logs</Button>
       </div>
       <div className="debug-toolbar">
-        <div className="debug-filter-chips" role="tablist" aria-label="Log level filter">
+        <div className="debug-filter-chips" role="group" aria-label="Log level filter">
           {[
             { key: "all", label: "All" },
             { key: "info", label: "Info" },
@@ -2371,6 +2316,7 @@ function DebugView({ debugLogs, captureEnabled, onStartCapture, onStopCapture, o
               key={item.key}
               type="button"
               className={`debug-chip debug-chip-${item.key} ${levelFilter === item.key ? "active" : ""}`}
+              aria-pressed={levelFilter === item.key}
               onClick={() => setLevelFilter(item.key)}
             >
               {item.label}
@@ -2431,7 +2377,6 @@ function AboutView({ backendState, state, version, updaterDevMode = false, onOpe
         <div className="settings-card-stack settings-card-stack-main about-card-stack">
           <SettingsCardShell
             title="About"
-            description="Desktop account switching and usage monitoring for Codex profiles."
             className="about-merged-card"
             testId="about-merged-card"
           >
@@ -2440,7 +2385,7 @@ function AboutView({ backendState, state, version, updaterDevMode = false, onOpe
                 <img src={iconUrl} alt="" />
                 <div>
                   <h2>Codex Account Manager</h2>
-                  <p>Electron desktop shell with Python API backend.</p>
+                  <p>Account switching and usage tracking for Codex.</p>
                   <span>Version <VersionDisplay version={version || "unknown"} updaterDevMode={updaterDevMode} /></span>
                 </div>
               </header>
@@ -2464,7 +2409,7 @@ function AboutView({ backendState, state, version, updaterDevMode = false, onOpe
                 </div>
                 <div className="about-detail-item">
                   <span className="about-detail-label">Stable web panel</span>
-                  <strong className="about-detail-value">Available through `codex-account ui`</strong>
+                  <strong className="about-detail-value"><code>codex-account ui</code></strong>
                 </div>
                 <div className="about-detail-item">
                   <span className="about-detail-label">Project</span>
@@ -2522,12 +2467,7 @@ function AboutView({ backendState, state, version, updaterDevMode = false, onOpe
                 </div>
               </div>
 
-              <div className="tech-pill-row">
-                <span className="chip chip-neutral">Electron</span>
-                <span className="chip chip-neutral">React</span>
-                <span className="chip chip-neutral">Python API</span>
-                <span className="chip chip-neutral">Playwright Tests</span>
-              </div>
+
             </div>
           </SettingsCardShell>
         </div>
@@ -3520,7 +3460,9 @@ function AppContent() {
       if (fromRects) setSwitchMotion({ token: `${Date.now()}-${target}`, target, fromRects });
       loadAll({ showLoading: false, clearUsageCache: true }).catch(() => {});
       setActivatedProfile(target);
-      notifySuccess("Account switched", `Codex reopened with ${target}.${continueWork ? " Continuation message queued in the previous chat." : ""}`);
+      if (next.continuationWarning) {
+        showToast({ tone: "warning", title: "Account switched", description: next.continuationWarning });
+      } else notifySuccess("Account switched", `Codex reopened with ${target}.${continueWork ? " Continuation message queued in the previous chat." : ""}`);
 
       setTimeout(() => setActivatedProfile((current) => (current === target ? "" : current)), 1100);
     } catch (err) {

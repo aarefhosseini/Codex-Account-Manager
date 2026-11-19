@@ -1403,10 +1403,10 @@ function destroySplashWindow() {
 function createMainWindow() {
   const iconPath = getWindowIconPath();
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 800,
-    minHeight: 560,
+    width: 960,
+    height: 630,
+    minWidth: 560,
+    minHeight: 420,
     title: DESKTOP_APP_NAME,
     icon: iconPath,
     show: false,

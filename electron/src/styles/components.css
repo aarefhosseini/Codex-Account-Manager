@@ -2978,28 +2978,6 @@ body.size-compact .columns-btn .columns-hidden-badge {
   font-size: 10px;
 }
 
-.actions-cell.compact {
-  display: grid;
-  grid-template-columns: 32px 32px;
-  gap: 6px;
-  justify-content: end;
-  width: 100%;
-  min-width: 0;
-  padding-right: 0;
-  overflow: hidden;
-}
-
-.actions-switch-btn {
-  font-size: var(--text-base);
-  line-height: 1;
-}
-
-body.size-compact .profiles-table-wrap td[data-col="actions"] .actions-switch-btn {
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-}
-
 .profiles-table-wrap td[data-col="actions"] .actions-cell > .btn:not(.actions-menu-btn) {
   width: 72px;
   min-width: 72px;
@@ -3020,17 +2998,6 @@ body.size-compact .profiles-table-wrap td[data-col="actions"] .actions-switch-bt
   max-width: 32px;
   height: 32px;
   padding: 0;
-}
-
-.profiles-table-wrap td[data-col="actions"] .actions-cell.compact .actions-menu-btn {
-  position: static;
-  transform: none;
-}
-
-.profiles-table-wrap td[data-col="actions"] .actions-cell.compact > .actions-switch-btn {
-  width: 32px;
-  min-width: 32px;
-  max-width: 32px;
 }
 
 .mobile-list {
@@ -4051,11 +4018,6 @@ body.size-compact .guide-layout {
   padding-right: 2px;
 }
 
-.guide-layer-map {
-  display: grid;
-  gap: var(--space-2);
-}
-
 .guide-reference-card {
   display: flex;
   flex-direction: column;
@@ -4226,13 +4188,6 @@ body.size-compact .guide-layout {
   font-weight: var(--weight-semibold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-}
-
-.update-source-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
 }
 
 .update-source-pill {

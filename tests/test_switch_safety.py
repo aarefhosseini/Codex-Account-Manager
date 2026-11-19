@@ -199,11 +199,36 @@ class SwitchSafetyTests(unittest.TestCase):
         for name in ("../work", "..", "/tmp/account", "a\\b"):
             self.assertEqual(cli.cmd_switch(name, False), 1)
 
-    def test_missing_previous_chat_aborts_before_closing_or_changing_account(self):
-        with mock.patch.object(desktop, "stop_apps") as stop:
-            self.assertEqual(cli.cmd_switch("work", True, resume_work=True), 1)
-        stop.assert_not_called()
-        self.assertEqual(cli.load_json(cli.AUTH_FILE), self.old)
+    def test_missing_previous_chat_still_switches_from_logged_out_state(self):
+        cli.AUTH_FILE.unlink()
+        with mock.patch.object(desktop, "stop_apps"), mock.patch.object(desktop, "start_app") as start:
+            self.assertEqual(cli.cmd_switch("work", True, resume_work=True), 0)
+        self.assertEqual(cli.load_json(cli.AUTH_FILE), self.target)
+        start.assert_called_once()
+
+    def test_failed_validation_rolls_back_and_next_switch_can_recover(self):
+        malformed = b"partial auth file"
+        cli.AUTH_FILE.write_bytes(malformed)
+        with mock.patch.object(desktop, "stop_apps"), mock.patch.object(desktop, "start_app") as start, \
+             mock.patch.object(cli, "refresh_and_sync_live_auth_snapshot", side_effect=[False, True]):
+            self.assertEqual(cli.cmd_switch("work", True), 1)
+            self.assertEqual(cli.AUTH_FILE.read_bytes(), malformed)
+            self.assertEqual(cli.load_json(cli.PROFILES_DIR / "work/auth.json"), self.target)
+            self.assertEqual(cli.cmd_switch("work", True), 0)
+        self.assertEqual(cli.load_json(cli.AUTH_FILE), self.target)
+        start.assert_called_once()
+
+    def test_continuation_failure_preserves_verified_switch(self):
+        output = io.StringIO()
+        url = "codex://threads/01a1dba5-094f-7de0-aebf-226e9316d8da"
+        with mock.patch.object(desktop, "last_thread_url", return_value=url), \
+             mock.patch.object(desktop, "stop_apps"), mock.patch.object(desktop, "start_app"), \
+             mock.patch.object(continuation, "find_resume_cli", return_value="/tmp/codex"), \
+             mock.patch.object(continuation, "continue_thread", side_effect=RuntimeError("Delivery unknown")), \
+             mock.patch("sys.stdout", output):
+            self.assertEqual(cli.cmd_switch("work", True, resume_work=True), 0)
+        self.assertIn("warning: Delivery unknown", output.getvalue())
+        self.assertEqual(cli.load_json(cli.AUTH_FILE), self.target)
 
     def test_unexpected_identity_after_refresh_restores_old_account(self):
         def wrong_identity(*args, **kwargs):

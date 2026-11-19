@@ -76,7 +76,8 @@ with sync_playwright() as playwright:
     page.get_by_label("Purchase date", exact=True).fill("2026-10-25")
     page.get_by_role("button", name="Save", exact=True).click()
     expect(page.get_by_text("Purchase date saved", exact=True)).to_be_visible()
-    expect(backup.locator('[title="2026-11-24"]')).to_be_visible()
+    expect(backup.locator('[data-col="expires"]')).to_contain_text("Estimated end")
+    assert page.evaluate("fixture.state.usage.profiles.find(row => row.name === 'backup').subscription.expires_at") == "2026-11-24"
     page.screenshot(path=str(output / "purchase-date.png"), full_page=True)
     backup.locator("[data-row-actions=backup]").click()
     page.get_by_role("button", name="Purchase date / Plus period").click()
@@ -97,10 +98,30 @@ with sync_playwright() as playwright:
     page.screenshot(path=str(output / "switch-error.png"), full_page=True)
     page.get_by_role("button", name="Close error", exact=True).click()
     expect(page.locator(".workspace-error")).to_have_count(0)
-    page.set_viewport_size({"width": 940, "height": 640})
+    page.evaluate("""() => {
+      for (const source of [fixture.state.list, fixture.state.usage]) {
+        for (let i = 1; i <= 4; i++) {
+          const name = `sample-${i}`;
+          source.profiles.push({
+            ...source.profiles[0], name, email: `${name}@example.test`,
+            account_id: name, is_current: false,
+          });
+        }
+      }
+    }""")
+    page.get_by_role("button", name="Refresh", exact=True).click()
+    expect(page.locator("tbody tr")).to_have_count(6)
+    page.set_viewport_size({"width": 960, "height": 600})
     expect(page.locator(".profiles-data-table")).to_be_visible()
     assert page.locator(".profiles-table-wrap").evaluate("el => el.scrollWidth <= el.clientWidth + 2")
+    expect(work.get_by_role("button", name="Switch to work", exact=True)).to_have_text("Switch")
+    expect(work.get_by_text("work@example.test", exact=True)).to_be_visible()
     page.screenshot(path=str(output / "compact.png"), full_page=True)
+    table_height = page.locator(".profiles-table-wrap").evaluate("el => el.clientHeight")
+    assert table_height >= 300, table_height
+    work.get_by_role("button", name="Switch to work", exact=True).scroll_into_view_if_needed()
+    assert page.locator(".profiles-table-wrap").evaluate("el => el.scrollTop > 0")
+    assert page.locator('th[data-col="h5remain"]').count() == 0
     for width in [600, 400]:
         page.set_viewport_size({"width": width, "height": 760})
         expect(page.get_by_test_id("profiles-mobile-list")).to_be_visible()
@@ -109,6 +130,8 @@ with sync_playwright() as playwright:
         expect(page.get_by_role("button", name="Switch to work", exact=True)).to_be_visible()
     page.screenshot(path=str(output / "narrow.png"), full_page=True)
     page.set_viewport_size({"width": 1440, "height": 1000})
+    expect(page.locator('th[data-col="h5remain"]')).to_be_visible()
+    expect(page.locator(".overview-counts")).to_be_visible()
     page.get_by_test_id("topbar-theme-button").click()
     page.get_by_test_id("topbar-theme-button").click()
     expect(page.locator("html")).to_have_attribute("data-theme", "light")
