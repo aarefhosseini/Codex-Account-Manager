@@ -2,6 +2,8 @@ import datetime as dt
 import io
 import json
 import plistlib
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -120,6 +122,48 @@ class ContinuationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "unknown"):
             continuation.continue_thread("codex", self.thread_id, Path("/tmp/test-home"), run=run)
         run.assert_called_once()
+
+
+class AppServerAuthTests(unittest.TestCase):
+    def test_refresh_waits_for_handshake_and_account_reply_before_closing_stdin(self):
+        server = """
+import json
+import sys
+
+def receive(expected):
+    message = json.loads(sys.stdin.readline())
+    assert message["method"] == expected
+    return message
+
+def send(message):
+    print(json.dumps(message), flush=True)
+
+receive("initialize")
+send({"id": 0, "result": {}})
+receive("initialized")
+request = receive("account/read")
+assert request["params"]["refreshToken"] is True
+send({"method": "account/updated", "params": {}})
+send({"id": request["id"], "result": {"account": {"type": "chatgpt"}}})
+sys.stdin.read()
+"""
+        self.assertEqual(self.run_server(server), (True, "refreshed", {"type": "chatgpt"}))
+
+    def test_early_disconnect_is_distinguished_from_signed_out(self):
+        self.assertEqual(
+            self.run_server("input()"),
+            (False, "codex app-server refresh failed: Codex CLI closed the connection before replying", None),
+        )
+
+    def run_server(self, source):
+        popen = subprocess.Popen
+
+        def launch(_args, **options):
+            return popen([sys.executable, "-u", "-c", source], **options)
+
+        with mock.patch.object(cli, "resolve_codex_cli", return_value="codex"), \
+             mock.patch.object(cli.subprocess, "Popen", side_effect=launch):
+            return cli.refresh_codex_auth_via_app_server(timeout_sec=3)
 
 
 class SwitchSafetyTests(unittest.TestCase):

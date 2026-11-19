@@ -993,7 +993,7 @@ function SidebarUsageArc({ metric, value }) {
   );
 }
 
-const SIDEBAR_APP_VERSION_FALLBACK = "v0.1.2";
+const SIDEBAR_APP_VERSION_FALLBACK = "v0.1.3";
 
 function VersionDisplay({ version, updaterDevMode = false, className = "" }) {
   const appVersion = String(version || SIDEBAR_APP_VERSION_FALLBACK).trim() || SIDEBAR_APP_VERSION_FALLBACK;

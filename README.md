@@ -16,7 +16,7 @@ The desktop builds target Apple Silicon Macs and 64-bit Windows PCs. The package
 | Windows (x64) | `.exe` | Run the installer and launch Codex Account Manager from the Start menu. |
 | Linux | Source | Follow the development instructions below. |
 
-Select the package for your computer on the [v0.1.2 release page](https://github.com/aarefhosseini/Codex-Account-Manager/releases/tag/v0.1.2). The release notes list the available files and their SHA-256 checksums. These community builds use ad hoc signing on macOS and are unsigned on Windows.
+Select the package for your computer on the [v0.1.3 release page](https://github.com/aarefhosseini/Codex-Account-Manager/releases/tag/v0.1.3). The release notes list the available files and their SHA-256 checksums. These community builds use ad hoc signing on macOS and are unsigned on Windows.
 
 ## Save and manage accounts
 
@@ -49,7 +49,7 @@ The desktop app includes light, dark, and system themes, keyboard navigation, re
 Install the CLI from a checkout or pin it to a release. Python 3.11 or newer is required for the standalone CLI.
 
 ```sh
-pipx install 'git+https://github.com/aarefhosseini/Codex-Account-Manager.git@v0.1.2'
+pipx install 'git+https://github.com/aarefhosseini/Codex-Account-Manager.git@v0.1.3'
 codex-account --help
 codex-account save work
 codex-account add personal --device-auth

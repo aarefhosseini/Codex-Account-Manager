@@ -4,6 +4,10 @@ This file tracks user-visible changes by version.
 
 ## Unreleased
 
+## 0.1.3
+
+- Fixed a race that could cancel an account switch before Codex returned the sign-in verification result.
+
 ## 0.1.2
 
 - Recover from a failed sign-in by restoring the previous state and keeping saved profiles available for another attempt.

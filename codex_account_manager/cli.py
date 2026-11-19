@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import os
+import queue
 import re
 import secrets
 import shlex
@@ -64,7 +65,7 @@ CAM_CONFIG_FILE = CAM_DIR / "config.json"
 CAM_LOG_FILE = CAM_DIR / "ui.log"
 CAM_LOG_MAX_BYTES = 2 * 1024 * 1024
 CAM_LOG_BACKUPS = 4
-DEFAULT_APP_VERSION = "0.1.2"
+DEFAULT_APP_VERSION = "0.1.3"
 
 
 def _build_ui_version(file_path: str = __file__) -> str:
@@ -1176,67 +1177,94 @@ def is_auth_expired_usage_error(err: str | None) -> bool:
 def refresh_codex_auth_via_app_server(timeout_sec: int = 12):
     try:
         codex_cli = resolve_codex_cli()
-    except Exception as e:
-        return False, f"codex cli unavailable: {e}", None
+    except Exception as error:
+        return False, f"codex cli unavailable: {error}", None
 
-    messages = [
-        {
-            "method": "initialize",
-            "id": 0,
-            "params": {
-                "clientInfo": {
-                    "name": "codex_account_manager",
-                    "title": "Codex Account Manager",
-                    "version": APP_VERSION,
-                }
-            },
+    initialize = {
+        "method": "initialize",
+        "id": 0,
+        "params": {
+            "clientInfo": {
+                "name": "codex_account_manager",
+                "title": "Codex Account Manager",
+                "version": APP_VERSION,
+            }
         },
-        {"method": "initialized", "params": {}},
-        {"method": "account/read", "id": 1, "params": {"refreshToken": True}},
-    ]
-    stdin_text = "".join(json.dumps(msg, separators=(",", ":")) + "\n" for msg in messages)
-    try:
-        proc = _subprocess_run(
-            [codex_cli, "app-server", "--listen", "stdio://"],
-            input=stdin_text,
-            capture_output=True,
-            text=True,
-            timeout=max(3, int(timeout_sec)),
-        )
-    except subprocess.TimeoutExpired:
-        return False, "codex app-server refresh timed out", None
-    except Exception as e:
-        return False, f"codex app-server refresh failed: {e}", None
+    }
+    replies = queue.Queue()
+    deadline = time.monotonic() + max(3, int(timeout_sec))
 
-    account_payload = None
-    error_text = ""
-    for line in str(proc.stdout or "").splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    def read_replies(stdout):
         try:
-            msg = json.loads(line)
-        except Exception:
-            continue
-        if msg.get("id") != 1:
-            continue
-        if isinstance(msg.get("error"), dict):
-            error_text = str(msg["error"].get("message") or msg["error"])
-            break
-        result = msg.get("result")
-        if isinstance(result, dict):
-            account_payload = result.get("account")
-            break
+            for line in stdout:
+                try:
+                    message = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(message, dict) and type(message.get("id")) is int and message["id"] in (0, 1):
+                    replies.put(message)
+        finally:
+            replies.put(None)
 
-    if proc.returncode not in (0, None) and account_payload is None:
-        stderr_text = str(proc.stderr or "").strip().splitlines()
-        tail = stderr_text[-1] if stderr_text else f"exit {proc.returncode}"
-        return False, f"codex app-server refresh failed: {tail}", None
-    if error_text:
-        return False, error_text, None
-    if not isinstance(account_payload, dict):
+    def wait_for_result(request_id):
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise queue.Empty
+            message = replies.get(timeout=remaining)
+            if message is None:
+                raise RuntimeError("Codex CLI closed the connection before replying")
+            if message["id"] != request_id:
+                continue
+            error = message.get("error")
+            if isinstance(error, dict):
+                code = error.get("code")
+                suffix = f" (code {code})" if type(code) is int else ""
+                raise RuntimeError(f"Codex CLI rejected the {('initialize', 'account/read')[request_id]} request{suffix}")
+            return message.get("result")
+
+    try:
+        options = _with_windows_hidden_subprocess({
+            "stdin": subprocess.PIPE,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.DEVNULL,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "env": {**os.environ, "CODEX_HOME": str(CODEX_HOME)},
+        })
+        with subprocess.Popen([codex_cli, "app-server", "--listen", "stdio://"], **options) as proc:
+            reader = threading.Thread(target=read_replies, args=(proc.stdout,), daemon=True)
+            reader.start()
+            try:
+                proc.stdin.write(json.dumps(initialize) + "\n")
+                proc.stdin.flush()
+                wait_for_result(0)
+
+                # EOF can make the server exit before it answers account/read.
+                proc.stdin.write(json.dumps({"method": "initialized", "params": {}}) + "\n")
+                proc.stdin.write(json.dumps({"method": "account/read", "id": 1, "params": {"refreshToken": True}}) + "\n")
+                proc.stdin.flush()
+                result = wait_for_result(1)
+            finally:
+                try:
+                    proc.stdin.close()
+                except BrokenPipeError:
+                    pass
+                try:
+                    proc.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                reader.join(timeout=1)
+    except queue.Empty:
+        return False, "codex app-server refresh timed out", None
+    except (OSError, RuntimeError) as error:
+        return False, f"codex app-server refresh failed: {error}", None
+
+    account = result.get("account") if isinstance(result, dict) else None
+    if not isinstance(account, dict):
         return False, "codex app-server returned no active account", None
-    return True, "refreshed", account_payload
+    return True, "refreshed", account
 
 
 @auth_operation
