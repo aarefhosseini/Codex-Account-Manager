@@ -5,6 +5,7 @@ const PROFILE_FIXED_COLUMN_WIDTHS = {
   cur: { compact: 18, default: 24 },
   purchased: { compact: 90, default: 100 },
   expires: { compact: 150, default: 170 },
+  resets: { compact: 90, default: 100 },
   auto: { compact: 48, default: 48 },
   actions: { compact: 116, default: 116 },
 };
@@ -27,6 +28,7 @@ const PROFILE_RESIZE_BOUNDS = {
   purchased: { min: 100, max: 320 },
   expires: { min: 140, max: 360 },
   note: { min: 96, max: 480 },
+  resets: { min: 82, max: 260 },
   auto: { min: 60, max: 120 },
 };
 

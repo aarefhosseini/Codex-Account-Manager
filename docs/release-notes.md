@@ -4,6 +4,10 @@ This file tracks user-visible changes by version.
 
 ## Unreleased
 
+## 0.1.4
+
+- Show available banked usage resets for saved accounts on the Profiles table, narrow-window cards, and account details. The details also show total resets earned when ChatGPT reports it.
+
 ## 0.1.3
 
 - Fixed a race that could cancel an account switch before Codex returned the sign-in verification result.

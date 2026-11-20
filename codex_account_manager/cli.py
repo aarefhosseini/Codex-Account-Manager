@@ -67,7 +67,7 @@ CAM_CONFIG_FILE = CAM_DIR / "config.json"
 CAM_LOG_FILE = CAM_DIR / "ui.log"
 CAM_LOG_MAX_BYTES = 2 * 1024 * 1024
 CAM_LOG_BACKUPS = 4
-DEFAULT_APP_VERSION = "0.1.3"
+DEFAULT_APP_VERSION = "0.1.4"
 
 
 def _build_ui_version(file_path: str = __file__) -> str:

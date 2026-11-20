@@ -16,7 +16,7 @@ The desktop builds target Apple Silicon Macs and 64-bit Windows PCs. The package
 | Windows (x64) | `.exe` | Run the installer and launch Codex Account Manager from the Start menu. |
 | Linux | Source | Follow the development instructions below. |
 
-Select the package for your computer on the [v0.1.3 release page](https://github.com/aarefhosseini/Codex-Account-Manager/releases/tag/v0.1.3). The release notes list the available files and their SHA-256 checksums. These community builds use ad hoc signing on macOS and are unsigned on Windows.
+Select the package for your computer on the [v0.1.4 release page](https://github.com/aarefhosseini/Codex-Account-Manager/releases/tag/v0.1.4). The release notes list the available files and their SHA-256 checksums. These community builds use ad hoc signing on macOS and are unsigned on Windows.
 
 ## Save and manage accounts
 
@@ -40,6 +40,8 @@ The dashboard shows remaining quota in the five-hour and weekly windows and the 
 
 The desktop **Plus period** column checks each saved profile for a renewal date, scheduled end date, or a renewal date that has passed when you open Profiles and when you click **Refresh**. It checks again every 10 minutes while Profiles is open. Dates use the Persian calendar with English digits. The lookup uses the saved Codex sign-in with an undocumented ChatGPT account endpoint, which may be unavailable for some accounts. If no billing date or status is available, you can enter a receipt date under **Purchase date / Plus period** in the row menu. That fallback is labeled **Estimated end** and uses 30 days from purchase.
 
+The **Resets left** column shows the banked usage resets reported by ChatGPT for each saved profile. Open the profile details to see how many resets the account has earned. An unavailable balance appears separately from a confirmed zero.
+
 **Auto Switch** lets you choose which profiles are eligible, set quota thresholds and a delay, and order a switch chain manually or by ranking. You can cancel a pending switch, run a one-time switch, or use the built-in test controls. Native notifications can report pending switches and show quota status. macOS has menu-bar controls, while Windows and Linux use a tray. Windows also offers a taskbar quota overlay and a mini meter.
 
 The desktop app includes light, dark, and system themes, keyboard navigation, reduced-motion support, a debug view, and an **Update** screen that checks this repository's releases.
@@ -49,7 +51,7 @@ The desktop app includes light, dark, and system themes, keyboard navigation, re
 Install the CLI from a checkout or pin it to a release. Python 3.11 or newer is required for the standalone CLI.
 
 ```sh
-pipx install 'git+https://github.com/aarefhosseini/Codex-Account-Manager.git@v0.1.3'
+pipx install 'git+https://github.com/aarefhosseini/Codex-Account-Manager.git@v0.1.4'
 codex-account --help
 codex-account save work
 codex-account add personal --device-auth

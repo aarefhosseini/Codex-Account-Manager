@@ -637,6 +637,7 @@ const tableColumnLayout = {
   added: { colClassName: "col-added", width: "5%" },
   purchased: { colClassName: "col-purchased", width: "100px" },
   expires: { colClassName: "col-expires", width: "170px" },
+  resets: { colClassName: "col-resets", width: "100px" },
   note: { colClassName: "col-note", width: "4%" },
   auto: { colClassName: "col-auto", width: "48px" },
   actions: { colClassName: "col-actions", width: "116px" },
@@ -996,7 +997,7 @@ function SidebarUsageArc({ metric, value }) {
   );
 }
 
-const SIDEBAR_APP_VERSION_FALLBACK = "v0.1.3";
+const SIDEBAR_APP_VERSION_FALLBACK = "v0.1.4";
 
 function VersionDisplay({ version, updaterDevMode = false, className = "" }) {
   const appVersion = String(version || SIDEBAR_APP_VERSION_FALLBACK).trim() || SIDEBAR_APP_VERSION_FALLBACK;
@@ -1489,7 +1490,7 @@ function AccountsTable({
   );
 }
 
-function AccountsMobileList({ profiles, switching, onSwitch, onOpenRowActions, onOpenAccountDetails }) {
+function AccountsMobileList({ profiles, showResetCredits, switching, onSwitch, onOpenRowActions, onOpenAccountDetails }) {
   return (
     <div className="mobile-list" data-testid="profiles-mobile-list">
       {profiles.map((profile) => {
@@ -1526,7 +1527,6 @@ function AccountsMobileList({ profiles, switching, onSwitch, onOpenRowActions, o
                 <StatusDot active={profile.is_current} />
                 <span className="mobile-profile">{profile.name || "-"}</span>
                 <span className="subscription-status">{subscriptionSummary(profile.subscription, profile.billing)}</span>
-                <span>Resets left {profile.resetCredits?.available ?? "unavailable"}</span>
               </div>
               <div className="mobile-actions">
                 <Button
@@ -1554,6 +1554,9 @@ function AccountsMobileList({ profiles, switching, onSwitch, onOpenRowActions, o
               <div className="mobile-stat"><span className="label">Weekly</span><span className={weeklyTone ? `usage-${weeklyTone}` : "loading-text"}>{usagePercent(profile, "usage_weekly")}</span></div>
               <div className="mobile-stat"><span className="label" title="Remaining time until 5h usage resets.">5h remain</span><span>{fmtRemain(profile.usage_5h?.resets_at)}</span></div>
               <div className="mobile-stat"><span className="label" title="W means weekly window. Remaining time until weekly reset.">W remain</span><span>{fmtRemain(profile.usage_weekly?.resets_at)}</span></div>
+              {showResetCredits && (
+                <div className="mobile-stat"><span className="label">Resets left</span><span>{profile.resetCredits?.available ?? "Unavailable"}</span></div>
+              )}
             </div>
           </div>
         );
@@ -1720,6 +1723,7 @@ function ProfilesView({
           />
           <AccountsMobileList
             profiles={profiles}
+            showResetCredits={visibleColumns.resets}
             switching={switching}
             onSwitch={onSwitch}
             onOpenRowActions={onOpenRowActions}
