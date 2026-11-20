@@ -160,6 +160,7 @@ const columnDefs = [
   { key: "added", label: "Added", required: false },
   { key: "purchased", label: "Purchased", required: false },
   { key: "expires", label: "Plus period", required: false },
+  { key: "resets", label: "Resets left", required: false },
   { key: "note", label: "Note", required: false },
   { key: "auto", label: "Auto", required: false },
   { key: "actions", label: "Actions", required: true },
@@ -170,7 +171,7 @@ const defaultColumns = {
   h5: true, h5remain: true, h5reset: false,
   weekly: true, weeklyremain: true, weeklyreset: false,
   plan: false, paid: false, id: false, added: false,
-  purchased: false, expires: true, note: false, auto: false, actions: true,
+  purchased: false, expires: true, resets: true, note: false, auto: false, actions: true,
 };
 
 function normalizeColumns(pref) {
@@ -494,6 +495,8 @@ function sortRows(rows, sort) {
         return String(row.subscription?.purchased_at || "");
       case "expires":
         return subscriptionDisplay(row.subscription, row.billing).at || "";
+      case "resets":
+        return row.resetCredits?.available ?? -1;
       case "plan":
         return String(row.plan_type || "");
       case "h5remain":
@@ -649,10 +652,10 @@ function planBadgeVariant(value) {
 
 function isColumnVisibleForViewport(key, viewportSizeClass) {
   if (viewportSizeClass === "size-compact") {
-    return ["cur", "profile", "h5", "weekly", "expires", "actions"].includes(key);
+    return ["cur", "profile", "h5", "weekly", "expires", "resets", "actions"].includes(key);
   }
   if (viewportSizeClass === "size-normal") {
-    return ["cur", "profile", "h5", "h5remain", "weekly", "weeklyremain", "plan", "expires", "actions"].includes(key);
+    return ["cur", "profile", "h5", "h5remain", "weekly", "weeklyremain", "plan", "expires", "resets", "actions"].includes(key);
   }
   return true;
 }
@@ -1402,6 +1405,10 @@ function AccountsTable({
             return <span className="muted id-value" title={profile.account_id || "-"}>{truncateAccountId(profile.account_id)}</span>;
           case "purchased":
             return <span className="muted" title={profile.subscription?.purchased_at || "Purchase date not set"}>{formatSubscriptionDate(profile.subscription?.purchased_at)}</span>;
+          case "resets":
+            return <span title={profile.resetCredits?.earned != null ? `${profile.resetCredits.earned} resets earned in total` : "Banked usage resets"}>
+              {profile.resetCredits?.available ?? "Unavailable"}
+            </span>;
           case "expires": {
             const period = subscriptionDisplay(profile.subscription, profile.billing);
             return <span className={`subscription-status subscription-period ${period.status}`} title={period.title}>
@@ -1519,6 +1526,7 @@ function AccountsMobileList({ profiles, switching, onSwitch, onOpenRowActions, o
                 <StatusDot active={profile.is_current} />
                 <span className="mobile-profile">{profile.name || "-"}</span>
                 <span className="subscription-status">{subscriptionSummary(profile.subscription, profile.billing)}</span>
+                <span>Resets left {profile.resetCredits?.available ?? "unavailable"}</span>
               </div>
               <div className="mobile-actions">
                 <Button
@@ -1584,6 +1592,7 @@ function ProfilesView({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [billingRows, setBillingRows] = useState([]);
+  const [resetRows, setResetRows] = useState([]);
   const rows = buildProfileRows(state);
   const profileKey = rows.length ? JSON.stringify(rows.map(({ name, account_id }) => [name, account_id])) : "";
   useEffect(() => {
@@ -1591,6 +1600,13 @@ function ProfilesView({
     let ignore = false;
     let timer;
     async function lookup() {
+      const resets = window.codexAccountDesktop.request("/api/local/reset-credits/lookup", {
+        method: "POST", timeoutMs: 30000,
+      }).then((result) => {
+        if (!ignore) setResetRows(Array.isArray(result?.profiles) ? result.profiles : []);
+      }).catch(() => {
+        if (!ignore) setResetRows([]);
+      });
       try {
         const result = await window.codexAccountDesktop.request("/api/local/subscriptions/lookup", {
           method: "POST", timeoutMs: 30000,
@@ -1599,6 +1615,7 @@ function ProfilesView({
       } catch {
         if (!ignore) setBillingRows([]);
       }
+      await resets;
       if (!ignore) timer = window.setTimeout(lookup, 10 * 60 * 1000);
     }
     lookup();
@@ -1608,9 +1625,15 @@ function ProfilesView({
     };
   }, [profileKey, billingRefresh]);
   const billingByName = new Map(billingRows.map((row) => [row.name, row]));
+  const resetsByName = new Map(resetRows.map((row) => [row.name, row]));
   const sortedProfiles = sortRows(rows.map((row) => {
     const billing = billingByName.get(row.name);
-    return billing?.account_id === row.account_id ? { ...row, billing } : row;
+    const resets = resetsByName.get(row.name);
+    return {
+      ...row,
+      billing: billing?.account_id === row.account_id ? billing : undefined,
+      resetCredits: resets?.account_id === row.account_id ? resets : undefined,
+    };
   }), sort);
   const allProfiles = sortedProfiles;
   const profiles = filterProfiles(allProfiles, query, filter);
@@ -5068,6 +5091,8 @@ function AppContent() {
                   <LabelValueRow label="Added" value={formatAccountDetailValue(fmtSavedAtFull(profile.saved_at))} />
                   <LabelValueRow label="Purchased" value={formatSubscriptionDate(profile.subscription?.purchased_at)} />
                   <LabelValueRow label="Plus period" value={subscriptionSummary(profile.subscription, profile.billing)} />
+                  <LabelValueRow label="Resets left" value={profile.resetCredits?.available ?? "Unavailable"} />
+                  <LabelValueRow label="Resets earned" value={profile.resetCredits?.earned ?? "Unavailable"} />
                   <LabelValueRow label="Note" value={formatAccountDetailValue(profile.note)} />
                 </section>
 
